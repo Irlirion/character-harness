@@ -866,7 +866,7 @@ The script needs a running service, so it is first executed in Task 8. Do not cl
 
 **Files:**
 - Rewrite: `docs/reviews/stt-model-selection.md`
-- Modify: `docs/integrations/minecraft-voice.md:11-13`
+- Modify: `docs/integrations/minecraft-voice.md:9-22` (line 9 provider prose, plus the "Running the STT service" section)
 
 - [ ] **Step 1: Rewrite the decision record**
 
