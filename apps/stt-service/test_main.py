@@ -1,13 +1,13 @@
 import http.client
-import io
 import json
+import struct
 import tempfile
 import threading
 import time
 import unittest
-import wave
 from pathlib import Path
-from unittest import mock
+
+import numpy as np
 
 from main import SttServer, SttService, MAX_AUDIO_BYTES, read_token
 
@@ -20,7 +20,10 @@ class FakeService:
 
     def __init__(self, transcribe=None):
         self.inference_slot = threading.Lock()
-        self.transcribe = transcribe or (lambda pcm: "Север здесь.")
+        self.transcribe = transcribe or (lambda _audio: "Север здесь.")
+
+    def is_loaded(self):
+        return True
 
     def is_ready(self):
         return True
@@ -118,46 +121,131 @@ class SttServiceTest(unittest.TestCase):
                 read_token(token_file)
 
 
-class TranscriptionPipelineTest(unittest.TestCase):
-    def test_resamples_to_wav_and_posts_fixed_russian_multipart(self):
+class RecognizerConversionTest(unittest.TestCase):
+    def test_pcm16_is_scaled_to_float32_at_the_capture_rate(self):
         captured = {}
 
-        def fake_ffmpeg(args, **kwargs):
-            self.assertEqual(kwargs["input"], b"\x01\x00" * 4800)
-            self.assertEqual(args[args.index("-ar") + 1], "48000")
-            output_path = Path(args[-1])
-            with wave.open(str(output_path), "wb") as wav:
-                wav.setnchannels(1)
-                wav.setsampwidth(2)
-                wav.setframerate(16000)
-                wav.writeframes(b"\x00\x00" * 1600)
-            captured["wav_path"] = output_path
-            return mock.Mock(returncode=0)
+        class CapturingRecognizer:
+            def is_loaded(self):
+                return True
 
-        class FakeResponse(io.BytesIO):
-            status = 200
-            def __enter__(self): return self
-            def __exit__(self, *_args): self.close()
+            def transcribe(self, samples, sample_rate):
+                captured["samples"] = samples
+                captured["sample_rate"] = sample_rate
+                return "север здесь"
 
-        def fake_urlopen(request, timeout):
-            captured["request"] = request
-            captured["timeout"] = timeout
-            return FakeResponse('{"text":"Север, вижу цель."}'.encode("utf-8"))
+        service = SttService(TOKEN, CapturingRecognizer())
+        text = service.transcribe(struct.pack("<hhh", -32768, 0, 32767))
 
-        service = SttService(TOKEN, "http://127.0.0.1:3083", ffmpeg="ffmpeg")
-        with mock.patch("main.subprocess.run", side_effect=fake_ffmpeg), mock.patch(
-            "main.urllib.request.urlopen", side_effect=fake_urlopen
-        ):
-            text = service.transcribe(b"\x01\x00" * 4800)
+        self.assertEqual(text, "север здесь")
+        self.assertEqual(captured["sample_rate"], 48000)
+        self.assertEqual(captured["samples"].dtype.name, "float32")
+        self.assertAlmostEqual(float(captured["samples"][0]), -1.0, places=6)
+        self.assertAlmostEqual(float(captured["samples"][1]), 0.0, places=6)
+        self.assertAlmostEqual(float(captured["samples"][2]), 32767 / 32768, places=6)
 
-        self.assertEqual(text, "Север, вижу цель.")
-        self.assertEqual(captured["timeout"], 18)
-        self.assertIn("multipart/form-data; boundary=", captured["request"].get_header("Content-type"))
-        multipart = captured["request"].data
-        self.assertIn(b'name="file"; filename="speech.wav"', multipart)
-        self.assertIn(b'name="language"\r\n\r\nru', multipart)
-        self.assertIn(b'name="response_format"\r\n\r\njson', multipart)
-        self.assertFalse(captured["wav_path"].exists(), "temporary resampled audio must be deleted")
+
+class RecognitionFailureTest(unittest.TestCase):
+    def serve(self, recognizer):
+        server = SttServer(("127.0.0.1", 0), SttService(TOKEN, recognizer))
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return port
+
+    def transcribe(self, port):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        conn.request(
+            "POST",
+            "/transcribe",
+            body=b"\x00\x00" * 100,
+            headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/octet-stream"},
+        )
+        response = conn.getresponse()
+        result = (response.status, json.loads(response.read()))
+        conn.close()
+        return result
+
+    def readiness(self, port):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        conn.request("GET", "/ready")
+        response = conn.getresponse()
+        result = (response.status, json.loads(response.read()))
+        conn.close()
+        return result
+
+    def test_failed_inference_is_a_502_and_leaves_the_service_ready(self):
+        class FailingRecognizer:
+            def is_loaded(self):
+                return True
+
+            def transcribe(self, _samples, _sample_rate):
+                raise ValueError("onnxruntime blew up")
+
+        port = self.serve(FailingRecognizer())
+        self.assertEqual(self.transcribe(port), (502, {"error": "stt_recognition_failed"}))
+        self.assertEqual(self.readiness(port), (200, {"ready": True}))
+
+    def test_oversized_transcript_is_rejected(self):
+        class LoudRecognizer:
+            def is_loaded(self):
+                return True
+
+            def transcribe(self, _samples, _sample_rate):
+                return "я" * 1001
+
+        self.assertEqual(self.transcribe(self.serve(LoudRecognizer())), (502, {"error": "stt_recognition_failed"}))
+
+    def test_widest_transcript_within_the_char_budget_is_accepted(self):
+        widest = "\U0001f600" * 1000  # four UTF-8 bytes each, so exactly MAX_TRANSCRIPT_BYTES
+
+        class WideRecognizer:
+            def is_loaded(self):
+                return True
+
+            def transcribe(self, _samples, _sample_rate):
+                return widest
+
+        self.assertEqual(self.transcribe(self.serve(WideRecognizer())), (200, {"text": widest}))
+
+    def test_unloaded_recognizer_is_never_ready(self):
+        class DarkRecognizer:
+            def is_loaded(self):
+                return False
+
+            def transcribe(self, _samples, _sample_rate):
+                raise AssertionError("must not transcribe while unloaded")
+
+        self.assertEqual(self.readiness(self.serve(DarkRecognizer())), (503, {"ready": False}))
+
+    def test_empty_audio_is_refused_before_recognition(self):
+        reached = threading.Event()
+
+        class WatchfulRecognizer:
+            def is_loaded(self):
+                return True
+
+            def transcribe(self, _samples, _sample_rate):
+                reached.set()
+                return "север"
+
+        service = SttService(TOKEN, WatchfulRecognizer())
+        with self.assertRaisesRegex(RuntimeError, "stt_audio_required"):
+            service.transcribe(b"")
+        self.assertFalse(reached.is_set())
+
+    def test_empty_transcript_is_passed_through(self):
+        class SilentRecognizer:
+            def is_loaded(self):
+                return True
+
+            def transcribe(self, _samples, _sample_rate):
+                return ""
+
+        self.assertEqual(self.transcribe(self.serve(SilentRecognizer())), (200, {"text": ""}))
 
 
 if __name__ == "__main__":

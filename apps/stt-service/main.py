@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import numpy as np
 import os
 import signal
 import socket
@@ -20,97 +21,48 @@ from pathlib import Path
 
 MAX_AUDIO_BYTES = 768_000  # mono PCM16 at 48 kHz for eight seconds
 MAX_TRANSCRIPT_CHARS = 1000
-BACKEND_TIMEOUT_SECONDS = 18
+MAX_TRANSCRIPT_BYTES = 4000
+CAPTURE_SAMPLE_RATE = 48000
+PCM_FULL_SCALE = 32768.0
 BACKEND_STARTUP_TIMEOUT_SECONDS = 60
 
 
+class Recognizer:
+    """Transcribes bounded float32 PCM to text. Only GigaamRecognizer implements it."""
+
+    def is_loaded(self) -> bool:
+        raise NotImplementedError
+
+    def transcribe(self, samples, sample_rate: int) -> str:
+        raise NotImplementedError
+
+
 class SttService:
-    def __init__(self, token: str, backend_url: str, ffmpeg: str = "ffmpeg", backend=None):
+    def __init__(self, token: str, recognizer: Recognizer):
         if len(token.encode("utf-8")) < 32:
             raise RuntimeError("stt_token_too_short")
         self.token = token
-        self.backend_url = backend_url.rstrip("/")
-        self.ffmpeg = ffmpeg
-        self.backend = backend
+        self.recognizer = recognizer
         self.inference_slot = threading.Lock()
-        self.restart_requested = threading.Event()
 
     def is_ready(self) -> bool:
-        if self.restart_requested.is_set() or self.backend is None:
-            return False
-        if self.backend.poll() is not None:
-            self.restart_requested.set()
-            return False
-        try:
-            with urllib.request.urlopen(f"{self.backend_url}/health", timeout=0.5) as response:
-                ready = response.status == 200 and json.loads(response.read(4096)).get("status") == "ok"
-                if not ready:
-                    self.restart_requested.set()
-                return ready
-        except (urllib.error.URLError, TimeoutError, socket.timeout, json.JSONDecodeError, OSError):
-            self.restart_requested.set()
-            return False
+        return self.recognizer.is_loaded()
 
     def transcribe(self, audio: bytes) -> str:
-        with tempfile.TemporaryDirectory(prefix="stt-") as temp_dir:
-            wav_path = Path(temp_dir) / "speech.wav"
-            command = [
-                self.ffmpeg,
-                "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-                "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", "pipe:0",
-                "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(wav_path),
-            ]
-            try:
-                subprocess.run(
-                    command,
-                    input=audio,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=5,
-                    check=True,
-                )
-                with wave.open(str(wav_path), "rb") as pcm:
-                    if pcm.getnchannels() != 1 or pcm.getframerate() != 16000 or pcm.getsampwidth() != 2:
-                        raise RuntimeError("stt_resample_format_invalid")
-                    if not 0 < pcm.getnframes() <= 128_000:
-                        raise RuntimeError("stt_resample_duration_invalid")
-                wav_bytes = wav_path.read_bytes()
-            except (OSError, subprocess.SubprocessError, wave.Error) as exc:
-                raise RuntimeError("stt_audio_conversion_failed") from exc
-
-            boundary = "----character-harness-stt-boundary"
-            body = b"".join((
-                f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\n".encode(),
-                b"Content-Type: audio/wav\r\n\r\n",
-                wav_bytes,
-                b"\r\n",
-                f"--{boundary}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n".encode(),
-                f"--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nru\r\n".encode(),
-                f"--{boundary}--\r\n".encode(),
-            ))
-            request = urllib.request.Request(
-                f"{self.backend_url}/inference",
-                data=body,
-                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=BACKEND_TIMEOUT_SECONDS) as response:
-                    if response.status != 200:
-                        raise RuntimeError("stt_backend_failed")
-                    result = json.loads(response.read(32_768))
-            except urllib.error.HTTPError as exc:
-                if exc.code >= 500 or exc.code == 408:
-                    self.restart_requested.set()
-                    raise RuntimeError("stt_backend_unavailable") from exc
-                raise RuntimeError("stt_backend_failed") from exc
-            except (urllib.error.URLError, TimeoutError, socket.timeout, json.JSONDecodeError, OSError) as exc:
-                self.restart_requested.set()
-                raise RuntimeError("stt_backend_unavailable") from exc
-            text = result.get("text") if isinstance(result, dict) else None
-            if not isinstance(text, str) or len(text) > MAX_TRANSCRIPT_CHARS or len(text.encode("utf-8")) > 4000:
-                raise RuntimeError("stt_backend_response_invalid")
-            return text
+        samples = np.frombuffer(audio, dtype="<i2").astype(np.float32) / PCM_FULL_SCALE
+        if samples.size == 0:
+            raise RuntimeError("stt_audio_required")
+        try:
+            text = self.recognizer.transcribe(samples, CAPTURE_SAMPLE_RATE)
+        except Exception as error:
+            raise RuntimeError("stt_recognition_failed") from error
+        if (
+            not isinstance(text, str)
+            or len(text) > MAX_TRANSCRIPT_CHARS
+            or len(text.encode("utf-8")) > MAX_TRANSCRIPT_BYTES
+        ):
+            raise RuntimeError("stt_recognition_failed")
+        return text
 
 
 class SttServer(ThreadingHTTPServer):
