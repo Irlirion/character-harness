@@ -79,8 +79,9 @@ public final class ClientBridge implements ClientModInitializer {
     private Object activeNetworkHandler;
     private Object activeWorldRef;
     private int observationTicks;
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).followRedirects(HttpClient.Redirect.NEVER).build();
     private BridgeConfig config;
+    private SttServiceClient sttService;
     private Pattern addressed;
     private boolean systemServerWarningLogged;
     private ClientActionController actionController;
@@ -89,6 +90,9 @@ public final class ClientBridge implements ClientModInitializer {
         try {
             instance = this;
             config = BridgeConfig.load();
+            if (config.sttEnabled() && config.sttProvider().equals("service")) {
+                sttService = new SttServiceClient(http, config.sttUrl(), config.sttToken());
+            }
             addressed = ChatAddress.pattern(config.characterName());
         } catch (Exception error) {
             LOG.error("Bridge disabled: {}", error.getMessage());
@@ -155,7 +159,9 @@ public final class ClientBridge implements ClientModInitializer {
         private void clear(){java.util.Arrays.fill(segment.samples(),(short)0);}
         @Override public void run(){
             try {
-                String transcript = new LocalWhisper(config).transcribe(segment.samples());
+                String transcript = config.sttProvider().equals("service")
+                        ? sttService.transcribe(segment.samples())
+                        : new LocalWhisper(config).transcribe(segment.samples());
                 String text = VoiceAddress.extract(transcript,config.characterName());
                 if (text == null || text.isBlank() || text.length() > 1000 || isRecentBotSpeech(text)
                         || !java.util.Objects.equals(activeWorldSessionId,sessionId)) return;
@@ -166,7 +172,9 @@ public final class ClientBridge implements ClientModInitializer {
                 JsonObject metadata=speakerMetadata.deepCopy(); JsonObject observed=nearbyPlayers.get(segment.speaker());
                 if(observed!=null){JsonObject profile=new JsonObject();profile.addProperty("uuid",segment.speaker().toString());profile.addProperty("name",observed.get("name").getAsString());profile.addProperty("distance",observed.get("distance").getAsDouble());profile.addProperty("bearing_degrees",observed.get("bearing_degrees").getAsDouble());profile.addProperty("line_of_sight",observed.get("line_of_sight").getAsBoolean());metadata.add("observed_profile",profile);}
                 forwardEvent(sourceKey, author, "minecraft_voice_stt", server, text,metadata);
-            } catch (Exception error) { LOG.warn("Local voice transcription failed: {}", error.getClass().getSimpleName()); }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } catch (Exception error) { LOG.warn("Voice transcription failed: {}", error.getClass().getSimpleName()); }
             finally { clear(); }
         }
     }

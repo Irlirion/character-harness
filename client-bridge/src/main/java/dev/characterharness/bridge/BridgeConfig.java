@@ -11,6 +11,7 @@ import java.util.Properties;
 
 record BridgeConfig(String coreUrl, String token, String characterName, boolean systemChatEnabled, String systemChatServer,
                     boolean actionsEnabled, boolean observationEnabled, String actionServer, boolean sttEnabled, String voiceServer,
+                    String sttProvider, String sttUrl, String sttToken,
                     String ffmpegPath, String whisperCliPath, String whisperModelPath) {
     static final String SYSTEM_CHAT_SERVER = "mc.agicraft.ru:25565";
 
@@ -18,7 +19,7 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
         Path path = FabricLoader.getInstance().getConfigDir().resolve("character-harness-bridge.properties");
         if (Files.notExists(path)) {
             Files.createDirectories(path.getParent());
-            Files.writeString(path, "core_url=http://127.0.0.1:3000\ncharacter_name=Север\ntoken_file=\nsystem_chat_enabled=false\nsystem_chat_server=mc.agicraft.ru:25565\nactions_enabled=false\nobservation_enabled=false\naction_server=mc.agicraft.ru:25565\nstt_enabled=false\nvoice_server=mc.agicraft.ru:25565\nffmpeg_path=/opt/homebrew/bin/ffmpeg\nwhisper_cli_path=\nwhisper_model_path=\n");
+            Files.writeString(path, "core_url=http://127.0.0.1:3000\ncharacter_name=Север\ntoken_file=\nsystem_chat_enabled=false\nsystem_chat_server=mc.agicraft.ru:25565\nactions_enabled=false\nobservation_enabled=false\naction_server=mc.agicraft.ru:25565\nstt_enabled=false\nvoice_server=mc.agicraft.ru:25565\nstt_provider=service\nstt_url=http://127.0.0.1:3082\nstt_token_file=\nffmpeg_path=/opt/homebrew/bin/ffmpeg\nwhisper_cli_path=\nwhisper_model_path=\n");
         }
         Properties properties = new Properties();
         try (var reader = Files.newBufferedReader(path)) { properties.load(reader); }
@@ -40,14 +41,24 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
         validateFeatureGates(actionsEnabled, observationEnabled, sttEnabled);
         String actionServer = normalizeSystemChatServer(properties.getProperty("action_server", SYSTEM_CHAT_SERVER).trim());
         String voiceServer = normalizeSystemChatServer(properties.getProperty("voice_server", SYSTEM_CHAT_SERVER).trim());
+        String sttProvider = properties.getProperty("stt_provider", "service").trim().toLowerCase(java.util.Locale.ROOT);
+        if (!sttProvider.equals("service") && !sttProvider.equals("local")) throw new IOException("stt_provider must be service or local");
+        String sttUrl = normalizeSttUrl(properties.getProperty("stt_url", "http://127.0.0.1:3082").trim());
+        String sttToken = "";
+        if (sttEnabled && sttProvider.equals("service")) {
+            String sttTokenPath = properties.getProperty("stt_token_file", "").trim();
+            if (sttTokenPath.isEmpty()) throw new IOException("Set stt_token_file when service STT is enabled");
+            sttToken = Files.readString(Path.of(sttTokenPath).toAbsolutePath().normalize()).trim();
+            if (sttToken.length() < 32) throw new IOException("STT service token file is invalid");
+        }
         String ffmpeg = properties.getProperty("ffmpeg_path", "/opt/homebrew/bin/ffmpeg").trim();
         String whisper = properties.getProperty("whisper_cli_path", "").trim();
         String model = properties.getProperty("whisper_model_path", "").trim();
-        if (sttEnabled && (ffmpeg.isEmpty() || whisper.isEmpty() || model.isEmpty()
+        if (sttEnabled && sttProvider.equals("local") && (ffmpeg.isEmpty() || whisper.isEmpty() || model.isEmpty()
                 || !Files.isExecutable(Path.of(ffmpeg)) || !Files.isExecutable(Path.of(whisper)) || !Files.isRegularFile(Path.of(model)))) {
             throw new IOException("STT enabled but local ffmpeg, whisper-cli, or multilingual model path is invalid");
         }
-        return new BridgeConfig(coreUrl, token, characterName, systemChatEnabled, systemChatServer, actionsEnabled, observationEnabled, actionServer, sttEnabled, voiceServer, ffmpeg, whisper, model);
+        return new BridgeConfig(coreUrl, token, characterName, systemChatEnabled, systemChatServer, actionsEnabled, observationEnabled, actionServer, sttEnabled, voiceServer, sttProvider, sttUrl, sttToken, ffmpeg, whisper, model);
     }
 
     private static boolean strictBoolean(String value, String property) throws IOException {
@@ -62,11 +73,19 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
     }
 
     static String normalizeCoreUrl(String value) throws IOException {
+        return normalizeLoopbackUrl(value, "core_url");
+    }
+
+    static String normalizeSttUrl(String value) throws IOException {
+        return normalizeLoopbackUrl(value, "stt_url");
+    }
+
+    private static String normalizeLoopbackUrl(String value, String property) throws IOException {
         final URI uri;
         try {
             uri = new URI(value);
         } catch (URISyntaxException error) {
-            throw new IOException("core_url must be a valid loopback HTTP URL", error);
+            throw new IOException(property + " must be a valid loopback HTTP URL", error);
         }
         String host = uri.getHost();
         int port = uri.getPort();
@@ -78,7 +97,7 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
                 || uri.getRawQuery() != null
                 || uri.getRawFragment() != null
                 || !(path == null || path.isEmpty() || "/".equals(path))) {
-            throw new IOException("core_url must be loopback HTTP with a valid port and no credentials, path, query, or fragment");
+            throw new IOException(property + " must be loopback HTTP with a valid port and no credentials, path, query, or fragment");
         }
         return "http://" + host.toLowerCase(java.util.Locale.ROOT) + ":" + port;
     }

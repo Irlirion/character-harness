@@ -15,6 +15,16 @@ class BridgeConfigTest {
     }
 
     @Test
+    void sttServiceUrlUsesTheSameStrictLoopbackBoundary() throws Exception {
+        assertEquals("http://127.0.0.1:3082", BridgeConfig.normalizeSttUrl("http://127.0.0.1:3082/"));
+        assertEquals("http://localhost:3082", BridgeConfig.normalizeSttUrl("http://LOCALHOST:3082"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSttUrl("http://127.0.0.1:3082@attacker.example"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSttUrl("http://user@127.0.0.1:3082"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSttUrl("https://127.0.0.1:3082"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSttUrl("http://127.0.0.1:3082/api"));
+    }
+
+    @Test
     void rejectsUserInfoHostConfusionAndUnexpectedUrlParts() {
         assertRejected("http://127.0.0.1:3000@attacker.example");
         assertRejected("http://user@127.0.0.1:3000");
