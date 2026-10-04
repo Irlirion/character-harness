@@ -1,42 +1,23 @@
 FROM python:3.12-slim-bookworm AS service-tests
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
+RUN pip install --no-cache-dir numpy==2.5.3
 COPY apps/stt-service/main.py /app/main.py
 COPY apps/stt-service/test_main.py /app/test_main.py
 RUN python /app/test_main.py
 
-FROM debian:bookworm-slim AS whisper-build
-ARG WHISPER_CPP_REV=927cfce34f31707e17f2bff35c349632fb9e2c3a
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates cmake build-essential git pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-RUN git init /src \
-    && git -C /src remote add origin https://github.com/ggml-org/whisper.cpp.git \
-    && git -C /src fetch --depth 1 origin "${WHISPER_CPP_REV}" \
-    && git -C /src checkout --detach FETCH_HEAD \
-    && test "$(git -C /src rev-parse HEAD)" = "${WHISPER_CPP_REV}"
-RUN cmake -S /src -B /build -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DWHISPER_BUILD_SERVER=ON \
-    -DWHISPER_BUILD_EXAMPLES=ON \
-    -DWHISPER_BUILD_TESTS=OFF \
-    -DWHISPER_CURL=OFF \
-    -DGGML_METAL=OFF \
-    -DGGML_CUDA=OFF \
-    -DGGML_CCACHE=OFF \
-    && cmake --build /build --parallel 4 --target whisper-server \
-    && ldd /build/bin/whisper-server
-
 FROM python:3.12-slim-bookworm AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg libgomp1 libstdc++6 \
-    && rm -rf /var/lib/apt/lists/* \
+    libgomp1 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+COPY apps/stt-service/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt \
     && groupadd --system --gid 10002 stt \
     && useradd --system --uid 10002 --gid 10002 --home-dir /nonexistent --shell /usr/sbin/nologin stt
 WORKDIR /app
-COPY --from=service-tests /app/main.py /app/main.py
-COPY --from=whisper-build /build/bin/whisper-server /usr/local/bin/whisper-server
+COPY apps/stt-service/main.py /app/main.py
 USER 10002:10002
 EXPOSE 3082
 ENTRYPOINT ["python", "/app/main.py"]
