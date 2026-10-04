@@ -120,10 +120,43 @@ services:
       timeout: 2s
       retries: 20
     restart: unless-stopped
+  stt:
+    build:
+      context: .
+      dockerfile: Dockerfile.stt
+    profiles: [stt]
+    environment:
+      STT_TOKEN_FILE: /run/secrets/stt_token
+      STT_MODEL: /models/ggml-small-q5_1.bin
+      STT_HOST: 0.0.0.0
+      STT_PORT: 3082
+      WHISPER_SERVER: /usr/local/bin/whisper-server
+      WHISPER_SERVER_HOST: 127.0.0.1
+      WHISPER_SERVER_PORT: 3083
+      STT_CPU_THREADS: ${STT_CPU_THREADS:-4}
+    secrets: [stt_token]
+    volumes:
+      - ${STT_MODEL_DIR:-./work/stt-models}:/models:ro
+    networks: [stt_internal]
+    ports: ['127.0.0.1:3082:3082']
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 2g
+    cpus: 4.0
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:3082/ready", timeout=1).read()']
+      interval: 5s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
 networks:
   storage: {internal: true}
   agent: {}
   tts_internal: {}
+  stt_internal: {}
 volumes:
   postgres_data:
   engine_data:
@@ -137,3 +170,4 @@ secrets:
   audio_token: {file: ./secrets/audio_token}
   bridge_token: {file: ./secrets/bridge_token}
   tts_token: {file: ./secrets/tts_token}
+  stt_token: {file: ./secrets/stt_token}
