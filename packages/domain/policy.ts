@@ -39,6 +39,13 @@ export function assertActive(state: { paused: boolean; epoch: number }, epoch: n
 export function assertReplay(original: string, incoming: string): void {
   if (original !== incoming) throw new DomainError('invocation_conflict');
 }
+/**
+ * nextEvent charges an attempt when it hands an event out, so a provider quota pause would
+ * otherwise spend the whole budget of an event nobody has answered yet and strand it.
+ */
+export function consumesAttempt(failure: string): boolean {
+  return failure !== 'usage_limit';
+}
 export function snapshot(principal: Principal, memories: Memory[]) {
   return { ...principal, memories: memories.filter(m => canReadMemory(principal, m)) };
 }

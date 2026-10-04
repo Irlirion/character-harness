@@ -5,6 +5,7 @@ import { configureCodex } from '../../packages/codex/config.ts';
 import { selectConfiguredModel } from '../../packages/codex/model.ts';
 import { classifyTurnFailure, usageLimitDelayMs } from '../../packages/codex/backoff.ts';
 import { secret } from '../../packages/domain/secrets.ts';
+import { consumesAttempt } from '../../packages/domain/policy.ts';
 const home=process.env.HARNESS_CODEX_HOME??'/data/codex';
 const cwd=process.env.HARNESS_CODEX_WORKSPACE??'/data/workspace';
 await configureCodex(home,cwd);
@@ -32,9 +33,11 @@ const sleep=(ms:number)=>new Promise<void>(resolve=>{
  wakeSleep=done;
 });
 while(!stopped){
- const client=new Client({name:'codex-harness-bridge',version:'0.1.0'});
- try{
-  const input=await api('/engine/input');if(!input.event){await sleep(1000);continue;}
+  const client=new Client({name:'codex-harness-bridge',version:'0.1.0'});
+  let pendingEventId:string|undefined;
+  try{
+   const input=await api('/engine/input');if(!input.event){await sleep(1000);continue;}
+   pendingEventId=input.event.id;
   await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{requestInit:{headers}}));
   const catalog=(await client.listTools()).tools;
   const allowed=new Set(['agent_get_status','memory_search','memory_propose']);
@@ -77,7 +80,13 @@ while(!stopped){
   }finally{clearTimeout(deadline);clearInterval(fence);rpc.onNotification=()=>{};rpc.onRequest=async()=>{throw new Error('no_active_turn');};}
  }catch(e){
   const turn=(e as {turn?:{error?:{message?:unknown}}}|undefined)?.turn;
-  if(classifyTurnFailure(turn)==='usage_limit'){
+  const failure=classifyTurnFailure(turn);
+  if(!consumesAttempt(failure)&&pendingEventId){
+   // Give the event back before pausing, otherwise the cooldown would spend the whole
+   // attempt budget of a message nobody has answered yet and strand it permanently.
+   await api('/engine/defer',{event_id:pendingEventId}).catch(()=>{});
+  }
+  if(failure==='usage_limit'){
    const retryInMs=usageLimitDelayMs(turn?.error,Date.now());
    console.error(JSON.stringify({event:'codex_usage_limit',retry_in_ms:retryInMs}));
    await sleep(retryInMs);

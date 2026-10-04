@@ -74,6 +74,14 @@ export async function nextEvent(p: Principal) {
   } catch (error) { await db.query('ROLLBACK'); throw error; }
   finally { db.release(); }
 }
+/** Hand an event back untouched: a quota pause is not a failure, so the budget is restored. */
+export async function deferEvent(p: Principal, eventId: string) {
+  const { rowCount } = await pool.query(`UPDATE social_events SET attempts=0
+    WHERE id=$1 AND character_id=$2 AND audience_id=$3 AND NOT processed`,
+    [eventId, p.characterId, p.audienceId]);
+  if (!rowCount) throw new DomainError('event_not_found');
+  return { deferred: true };
+}
 export async function complete(p: Principal, eventId: string, text: string, epoch: number, speak = false) {
   const db = await pool.connect();
   try {

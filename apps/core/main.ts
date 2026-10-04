@@ -5,7 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { secret } from '../../packages/domain/secrets.ts';
 import { DomainError, matchesToken, requestPath, requiredRole } from '../../packages/domain/policy.ts';
-import { pool, status, search, remember, control, ingest, nextEvent, complete } from '../../packages/storage/db.ts';
+import { pool, status, search, remember, control, ingest, nextEvent, complete, deferEvent } from '../../packages/storage/db.ts';
 import { enqueueSpeech, claimSpeech, speechState, updateSpeech } from '../../packages/storage/speech.ts';
 import { BridgeEventScopeError, parseBridgeEvent } from '../../packages/domain/bridge-event.ts';
 
@@ -106,6 +106,10 @@ app.get('/engine/input', async (_req, reply) => {
   const state = await status(principal);
   return { character: state, audience_id: principal.audienceId,
     event: state.paused ? null : event, memories: await search(principal, '') };
+});
+app.post('/engine/defer', async req => {
+  const event_id = z.string().uuid().parse((req.body as { event_id: string }).event_id);
+  return deferEvent(principal, event_id);
 });
 app.post('/engine/complete', async req => {
   const body = z.object({ event_id: z.string().uuid(), text: z.string().min(1).max(8000), epoch: z.number().int().positive(), speak: z.boolean().default(false) }).strict().parse(req.body);
