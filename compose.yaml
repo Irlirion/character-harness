@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:18-bookworm
+    environment:
+      POSTGRES_DB: harness
+      POSTGRES_USER: harness
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [postgres_data:/var/lib/postgresql]
+    networks: [storage]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U harness -d harness']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  migrate:
+    build: .
+    command: [node, --experimental-strip-types, packages/storage/migrate.ts]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+    secrets: [database_url]
+    networks: [storage]
+    depends_on:
+      postgres: {condition: service_healthy}
+  core:
+    build: .
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      ENGINE_TOKEN_FILE: /run/secrets/engine_token
+      OWNER_TOKEN_FILE: /run/secrets/owner_token
+      AUDIO_TOKEN_FILE: /run/secrets/audio_token
+      CHARACTER_ID: sever
+      AUDIENCE_ID: demo-public
+    secrets: [database_url, engine_token, owner_token, audio_token]
+    networks: [storage, agent]
+    ports: ['127.0.0.1:3000:3000']
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, node, -e, 'fetch("http://localhost:3000/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  engine:
+    build: .
+    command: [node, --experimental-strip-types, apps/engine/main.ts]
+    profiles: [agent]
+    environment:
+      CORE_URL: http://core:3000
+      ENGINE_TOKEN_FILE: /run/secrets/engine_token
+      MODEL_API_KEY_FILE: /run/secrets/model_api_key
+      PI_PROVIDER: ${PI_PROVIDER:-}
+      PI_MODEL: ${PI_MODEL:-}
+    secrets: [engine_token, model_api_key]
+    volumes: [engine_data:/data]
+    networks: [agent]
+    depends_on:
+      core: {condition: service_healthy}
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+networks:
+  storage: {internal: true}
+  agent: {}
+volumes:
+  postgres_data:
+  engine_data:
+secrets:
+  db_password: {file: ./secrets/db_password}
+  database_url: {file: ./secrets/database_url}
+  engine_token: {file: ./secrets/engine_token}
+  owner_token: {file: ./secrets/owner_token}
+  model_api_key: {file: ./secrets/model_api_key}
+  audio_token: {file: ./secrets/audio_token}

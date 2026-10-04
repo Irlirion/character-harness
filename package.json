@@ -1,0 +1,18 @@
+{
+  "name": "character-harness", "version": "0.1.0", "private": true, "type": "module",
+  "packageManager": "pnpm@10.11.0", "engines": { "node": ">=24 <25" },
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "core": "node --experimental-strip-types apps/core/main.ts",
+    "migrate": "node --experimental-strip-types packages/storage/migrate.ts",
+    "engine": "node --experimental-strip-types apps/engine/main.ts",
+    "smoke": "node --experimental-strip-types scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@modelcontextprotocol/sdk": "1.25.3",
+    "fastify": "5.6.2", "pg": "8.16.3", "zod": "4.1.13"
+  },
+  "devDependencies": { "@types/node": "24.10.1", "@types/pg": "8.15.6", "typescript": "5.9.3" }
+}
