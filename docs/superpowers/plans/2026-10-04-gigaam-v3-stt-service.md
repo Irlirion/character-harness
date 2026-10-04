@@ -539,23 +539,35 @@ COPY apps/stt-service/test_main.py /app/test_main.py
 RUN python /app/test_main.py
 
 FROM python:3.12-slim-bookworm AS runtime
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    ORT_DISABLE_TELEMETRY=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgomp1 libstdc++6 \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 COPY apps/stt-service/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt \
+    && pip freeze \
     && groupadd --system --gid 10002 stt \
     && useradd --system --uid 10002 --gid 10002 --home-dir /nonexistent --shell /usr/sbin/nologin stt
 WORKDIR /app
-COPY apps/stt-service/main.py /app/main.py
+COPY --from=service-tests /app/main.py /app/main.py
 USER 10002:10002
 EXPOSE 3082
 ENTRYPOINT ["python", "/app/main.py"]
 ```
 
-The `whisper-build` stage is gone, along with `ca-certificates`, `cmake`, `build-essential`, `git`, `pkg-config` and `ffmpeg`. `libgomp1` and `libstdc++6` stay because ONNX Runtime links against them.
+The `whisper-build` stage is gone, along with `ca-certificates`, `cmake`, `build-essential`, `git`, `pkg-config` and `ffmpeg`.
+
+`libstdc++6` stays as deliberate insurance against a base-image change, at zero cost, because the base image already ships it. `libgomp1` is **not** installed and never was required: ONNX Runtime's `DT_NEEDED` on both the aarch64 and x86_64 wheels is only `libc, libdl, libgcc_s, libm, libpthread, librt, libstdc++`. Loading and inference succeed on a bare `python:3.12-slim-bookworm` with no apt packages at all.
+
+`ORT_DISABLE_TELEMETRY=1` keeps the privacy property in the image rather than in `compose.yaml`. With `HOME=/nonexistent`, ORT otherwise logs `Failed to persist telemetry device ID` and, wherever `HOME` is writable, writes a persistent machine identifier plus an `onnxruntime.db` SQLite event database. Only `read_only: true` in compose was preventing that.
+
+`COPY --from=service-tests` is load-bearing, not incidental. The runtime stage must depend on the test stage so that BuildKit keeps it in the graph: BuildKit prunes any stage that is not an ancestor of the target, so a plain `COPY apps/stt-service/main.py` in the runtime stage means a default `docker compose build stt` never runs `RUN python /app/test_main.py`. Keep the two-base split — `service-tests` installs only numpy, `runtime` installs all three pins — and do **not** fold them into a shared `dependencies` base the way `Dockerfile.tts` does, because that base would install `onnxruntime` and destroy the property that makes the test stage worth having: proof that the contract tests need no ML dependency, and therefore that `GigaamRecognizer.load()`'s lazy import is intact.
+
+`pip freeze` records the three transitive distributions that the pins do not cover (`flatbuffers`, `packaging`, `protobuf`, the last with no ceiling from ONNX Runtime) in the build log.
 
 - [ ] **Step 3: Verify the contract tests pass inside the image build**
 
