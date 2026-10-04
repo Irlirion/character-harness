@@ -3,9 +3,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { CodexRpc } from '../../packages/codex/rpc.ts';
 import { configureCodex } from '../../packages/codex/config.ts';
 import { selectConfiguredModel } from '../../packages/codex/model.ts';
-import { classifyTurnFailure, usageLimitDelayMs } from '../../packages/codex/backoff.ts';
+import { handleAttemptFailure } from '../../packages/codex/backoff.ts';
 import { secret } from '../../packages/domain/secrets.ts';
-import { consumesAttempt } from '../../packages/domain/policy.ts';
 const home=process.env.HARNESS_CODEX_HOME??'/data/codex';
 const cwd=process.env.HARNESS_CODEX_WORKSPACE??'/data/workspace';
 await configureCodex(home,cwd);
@@ -79,21 +78,9 @@ while(!stopped){
    await api('/engine/complete',{event_id:input.event.id,epoch:input.character.epoch,text:reply,speak:true});
   }finally{clearTimeout(deadline);clearInterval(fence);rpc.onNotification=()=>{};rpc.onRequest=async()=>{throw new Error('no_active_turn');};}
  }catch(e){
-  const turn=(e as {turn?:{error?:{message?:unknown}}}|undefined)?.turn;
-  const failure=classifyTurnFailure(turn);
-  if(!consumesAttempt(failure)&&pendingEventId){
-   // Give the event back before pausing, otherwise the cooldown would spend the whole
-   // attempt budget of a message nobody has answered yet and strand it permanently.
-   await api('/engine/defer',{event_id:pendingEventId}).catch(()=>{});
-  }
-  if(failure==='usage_limit'){
-   const retryInMs=usageLimitDelayMs(turn?.error,Date.now());
-   console.error(JSON.stringify({event:'codex_usage_limit',retry_in_ms:retryInMs}));
-   await sleep(retryInMs);
-  }else{
-   console.error(JSON.stringify({event:'codex_attempt_failed',error_type:e instanceof Error?e.message:'unknown'}));
-   await sleep(1000);
-  }
+  await handleAttemptFailure(e,{eventId:pendingEventId,
+   defer:async event_id=>{await api('/engine/defer',{event_id});},
+   sleep,log:entry=>console.error(JSON.stringify(entry)),now:Date.now});
  }
  finally{await client.close();threadId=undefined;turnId=undefined;}
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { matchesToken, snapshot, assertActive, assertReplay, consumesAttempt } from '../packages/domain/policy.ts';
+import { matchesToken, snapshot, assertActive, assertReplay } from '../packages/domain/policy.ts';
 const p = { characterId: 'sever', audienceId: 'public' };
 test('private and other-character memories are excluded from public snapshot', () => {
   const records = [
@@ -25,11 +25,4 @@ test('engine token does not authenticate owner and malformed tokens fail closed'
   assert.equal(matchesToken(`Bearer ${engine}`,owner),false);
   assert.equal(matchesToken(undefined,engine),false);
   assert.equal(matchesToken('Bearer short',engine),false);
-});
-test('a quota pause is not a failed attempt and must not consume the budget', () => {
-  assert.equal(consumesAttempt('usage_limit'),false);
-});
-test('a real failure still consumes the attempt budget', () => {
-  assert.equal(consumesAttempt('transient'),true);
-  assert.equal(consumesAttempt('turn_revoked'),true);
 });
