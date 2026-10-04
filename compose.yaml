@@ -33,6 +33,7 @@ services:
       BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
       CHARACTER_ID: sever
       AUDIENCE_ID: demo-public
+      BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO: ${BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO:-false}
     secrets: [database_url, engine_token, owner_token, audio_token, bridge_token]
     networks: [storage, agent]
     ports: ['127.0.0.1:3000:3000']

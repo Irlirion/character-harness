@@ -7,6 +7,7 @@ import { secret } from '../../packages/domain/secrets.ts';
 import { DomainError, matchesToken } from '../../packages/domain/policy.ts';
 import { pool, status, search, remember, control, ingest, nextEvent, complete } from '../../packages/storage/db.ts';
 import { enqueueSpeech, claimSpeech, speechState, updateSpeech } from '../../packages/storage/speech.ts';
+import { BridgeEventScopeError, parseBridgeEvent } from '../../packages/domain/bridge-event.ts';
 
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 const principal = { characterId: process.env.CHARACTER_ID ?? 'sever', audienceId: process.env.AUDIENCE_ID ?? 'demo-public' };
@@ -14,6 +15,9 @@ const engineToken = secret('ENGINE_TOKEN');
 const ownerToken = secret('OWNER_TOKEN');
 const audioToken = secret('AUDIO_TOKEN');
 const bridgeToken = secret('BRIDGE_TOKEN');
+const systemChatDemoSetting = process.env.BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO ?? 'false';
+if (systemChatDemoSetting !== 'true' && systemChatDemoSetting !== 'false') throw new Error('BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO must be true or false');
+const allowSystemChatPublicDemo = systemChatDemoSetting === 'true';
 if (audioToken.length < 32 || audioToken === ownerToken || audioToken === engineToken) throw new Error('Distinct audio token required');
 if (bridgeToken.length < 32 || new Set([bridgeToken, ownerToken, engineToken, audioToken]).size !== 4) throw new Error('Distinct bridge token required');
 if (engineToken.length < 32 || ownerToken.length < 32 || engineToken === ownerToken) throw new Error('Distinct tokens of at least 32 characters required');
@@ -58,22 +62,33 @@ app.post('/audio/jobs/:id', async req => {
   const b=z.object({claim_id:z.string().uuid(),state:z.enum(['playing','completed','failed','cancelled'])}).strict().parse(req.body);
   return updateSpeech(principal,z.string().uuid().parse((req.params as {id:string}).id),b.claim_id,b.state);
 });
-app.post('/owner/events', async req => ingest(principal, z.object({
-  source_key: z.string().min(1).max(200), author_id: z.string().min(1).max(200),
-  text: z.string().min(1).max(4000), reply_to: z.string().max(200).optional()
-}).strict().parse(req.body)));
-app.post('/bridge/events', async req => ingest(principal, z.object({
-  source_key:z.string().regex(/^minecraft:[^\s]{1,300}$/), author_id:z.string().uuid(),
-  text:z.string().min(1).max(1000)
-}).strict().parse(req.body)));
+app.post('/owner/events', async req => {
+  const event = z.object({
+    source_key: z.string().min(1).max(200), author_id: z.string().min(1).max(200),
+    text: z.string().min(1).max(4000), reply_to: z.string().max(200).optional()
+  }).strict().parse(req.body);
+  return ingest(principal, { ...event, author_provenance: 'owner_input', author_trust: 'unverified' });
+});
+app.post('/bridge/events', async (req, reply) => {
+  let event;
+  try { event = parseBridgeEvent(req.body, allowSystemChatPublicDemo, principal.audienceId); }
+  catch (error) {
+    if (error instanceof BridgeEventScopeError) {
+      req.log.warn({ reason: error.message }, 'Rejected unverified system chat event');
+      return reply.code(403).send({ error: error.message });
+    }
+    throw error;
+  }
+  return ingest(principal, event);
+});
 app.get('/bridge/replies', async () => (await pool.query(`SELECT e.id,e.author_id,r.text
   FROM social_events e JOIN replies r ON r.event_id=e.id
-  WHERE e.character_id=$1 AND e.audience_id=$2 AND e.source_key LIKE 'minecraft:%' AND NOT e.reply_delivered
+  WHERE e.character_id=$1 AND e.audience_id=$2 AND (e.source_key LIKE 'minecraft:%' OR e.source_key LIKE 'minecraft-system:%') AND NOT e.reply_delivered
   ORDER BY e.created_at,e.id LIMIT 20`,[principal.characterId,principal.audienceId])).rows);
 app.post('/bridge/replies/:id/ack', async req => {
   const id=z.string().uuid().parse((req.params as {id:string}).id);
   const result=await pool.query(`UPDATE social_events SET reply_delivered=true
-    WHERE id=$1 AND character_id=$2 AND audience_id=$3 AND source_key LIKE 'minecraft:%' AND processed
+    WHERE id=$1 AND character_id=$2 AND audience_id=$3 AND (source_key LIKE 'minecraft:%' OR source_key LIKE 'minecraft-system:%') AND processed
     AND EXISTS(SELECT 1 FROM replies WHERE event_id=$1)`,[id,principal.characterId,principal.audienceId]);
   if(!result.rowCount)throw new DomainError('reply_not_found');
   return {acknowledged:true};

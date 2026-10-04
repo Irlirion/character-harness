@@ -8,7 +8,7 @@ async function call(token:string,path:string,method='GET',body?:unknown){
 }
 const denied=await call(engine,'/bridge/replies');
 const allowed=await call(bridge,'/bridge/replies');
-const invalid=await call(bridge,'/bridge/events','POST',{source_key:'minecraft:invalid',author_id:'not-a-uuid',text:'test'});
+const invalid=await call(bridge,'/bridge/events','POST',{source_key:'minecraft:invalid',author_id:'not-a-uuid',author_provenance:'fabric_profile_context',text:'test'});
 if(denied.status!==401||allowed.status!==200||invalid.status!==400){
  console.error(JSON.stringify({denied:denied.status,allowed:allowed.status,invalid:invalid.status}));
  throw new Error('bridge_auth_or_validation_failed');

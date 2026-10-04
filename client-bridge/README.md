@@ -24,11 +24,17 @@ Copy the jar into the test instance's `minecraft/mods/` folder and create `minec
 core_url=http://127.0.0.1:3000
 character_name=Север
 token_file=/absolute/path/to/character-harness/secrets/bridge_token
+system_chat_enabled=false
+system_chat_server=mc.agicraft.ru:25565
 ```
 
 `core_url` must be plain HTTP on exactly `127.0.0.1` or `localhost` with an explicit port from 1 to 65535. Credentials, any path other than `/`, query strings and fragments are rejected before the bridge token is read.
 
 Start core, the Codex profile and the native audio worker, then restart only the test Minecraft instance. In-game, address the character with `@Север привет` or `Север: привет`. Only addressed messages are forwarded. The mod ignores messages from its own player UUID.
+
+Some servers send player chat as an ordinary system message instead of signed chat. An optional adapter reads only the visible `<nickname> addressed text` shape from Fabric's GAME event. It is disabled by default. For the test server only, set `system_chat_enabled=true`; its address is pinned to `mc.agicraft.ru:25565`. Core also requires `BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO=true` and `AUDIENCE_ID=demo-public` before accepting this event type. Configure that non-secret opt-in when starting Compose, for example `BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO=true docker compose up --build -d core`.
+
+The system-chat nickname is spoofable display text, stored under a separate `minecraft-system:` namespace with provenance `minecraft_system_chat` and trust `unverified`. The UUID from signed Fabric chat is also stored as `unverified` server profile context; it is not proof of an online-mode identity. Neither form grants privileges or links identities across channels. System-chat ingestion is rejected outside the public demo audience.
 
 The bridge sends the UUID provided with the server chat message context, not a player nickname or a log-parser match. That UUID is a server-provided profile identifier; on offline-mode servers it does not prove a Mojang account identity. It must not be used for cross-channel identity or private-memory access.
 

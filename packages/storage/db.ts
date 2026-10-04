@@ -49,10 +49,10 @@ export async function control(p: Principal, paused: boolean) {
   if (!rows[0]) throw new DomainError('character_not_found');
   return rows[0];
 }
-export async function ingest(p: Principal, event: { source_key: string; author_id: string; text: string; reply_to?: string }) {
-  const { rows } = await pool.query(`INSERT INTO social_events(id,character_id,audience_id,source_key,author_id,text,reply_to)
-    VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(character_id,audience_id,source_key) DO NOTHING RETURNING id`,
-    [randomUUID(), p.characterId, p.audienceId, event.source_key, event.author_id, event.text, event.reply_to ?? null]);
+export async function ingest(p: Principal, event: { source_key: string; author_id: string; text: string; reply_to?: string; author_provenance: string; author_trust: 'unverified' }) {
+  const { rows } = await pool.query(`INSERT INTO social_events(id,character_id,audience_id,source_key,author_id,text,reply_to,author_provenance,author_trust)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(character_id,audience_id,source_key) DO NOTHING RETURNING id`,
+    [randomUUID(), p.characterId, p.audienceId, event.source_key, event.author_id, event.text, event.reply_to ?? null, event.author_provenance, event.author_trust]);
   return { inserted: rows.length === 1, event_id: rows[0]?.id ?? null };
 }
 export async function nextEvent(p: Principal) {
@@ -63,7 +63,7 @@ export async function nextEvent(p: Principal) {
     if (!state || state.paused || (state.lease_until && new Date(state.lease_until).getTime() > Date.now())) {
       await db.query('COMMIT'); return null;
     }
-    const event = (await db.query(`SELECT id,author_id,text,reply_to FROM social_events
+    const event = (await db.query(`SELECT id,author_id,author_provenance,author_trust,text,reply_to FROM social_events
       WHERE character_id=$1 AND audience_id=$2 AND NOT processed AND attempts<3 ORDER BY created_at,id LIMIT 1`,
       [p.characterId,p.audienceId])).rows[0];
     if (event) {

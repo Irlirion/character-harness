@@ -28,6 +28,15 @@ class BridgeConfigTest {
         assertRejected("http://[::1]:3000");
     }
 
+    @Test
+    void systemChatAdapterIsBoundToTheKnownServer() throws Exception {
+        assertEquals(BridgeConfig.SYSTEM_CHAT_SERVER, BridgeConfig.normalizeSystemChatServer("mc.agicraft.ru"));
+        assertEquals(BridgeConfig.SYSTEM_CHAT_SERVER, BridgeConfig.normalizeSystemChatServer("MC.AGICRAFT.RU:25565"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSystemChatServer("mc.agicraft.ru:25566"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSystemChatServer("mc.agicraft.ru:25565@attacker.example"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSystemChatServer("attacker.example:25565"));
+    }
+
     private static void assertRejected(String value) {
         assertThrows(IOException.class, () -> BridgeConfig.normalizeCoreUrl(value), value);
     }
