@@ -186,8 +186,8 @@ function gateway() {
     }
   });
   server.registerTool('agent_walk', {
-    description: 'Walk briefly using normal client movement keys. This queues an action; use agent_action_status and only say it succeeded after state=completed. Maximum 1200 ms. Cannot jump, sprint, break blocks, or interact.',
-    inputSchema: { forward:z.number().refine(n=>[-1,0,1].includes(n)), strafe:z.number().refine(n=>[-1,0,1].includes(n)), duration_ms:z.number().int().min(100).max(1200), invocation_id:z.string().min(1).max(200), expected_epoch:z.number().int().positive() }
+    description: 'Walk briefly using normal client movement keys. forward is -1 backward, 0 neutral, 1 forward; strafe is -1 left, 0 neutral, 1 right. Both axes may be combined. This queues an action; use agent_action_status and only say it succeeded after state=completed. Maximum 1200 ms. Cannot jump, sprint, break blocks, or interact.',
+    inputSchema: { forward:z.number().int().min(-1).max(1), strafe:z.number().int().min(-1).max(1), duration_ms:z.number().int().min(100).max(1200), invocation_id:z.string().min(1).max(200), expected_epoch:z.number().int().positive() }
   }, async ({forward,strafe,duration_ms,invocation_id,expected_epoch}) => {
     if (!allowClientWorld) return { ...result({error:'client_world_disabled'}), isError:true };
     if (forward === 0 && strafe === 0) return { ...result({error:'empty_movement'}), isError:true };
