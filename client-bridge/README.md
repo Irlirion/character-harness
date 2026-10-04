@@ -31,12 +31,8 @@ observation_enabled=false
 action_server=mc.agicraft.ru:25565
 stt_enabled=false
 voice_server=mc.agicraft.ru:25565
-stt_provider=service
 stt_url=http://127.0.0.1:3082
 stt_token_file=/absolute/path/to/character-harness/secrets/stt_token
-ffmpeg_path=/opt/homebrew/bin/ffmpeg
-whisper_cli_path=/absolute/path/to/whisper.cpp/build/bin/whisper-cli
-whisper_model_path=/absolute/path/to/whisper.cpp/models/ggml-base.bin
 ```
 
 `core_url` must be plain HTTP on exactly `127.0.0.1` or `localhost` with an explicit port from 1 to 65535. Credentials, any path other than `/`, query strings and fragments are rejected before the bridge token is read.
@@ -61,6 +57,6 @@ The client publishes one compact local snapshot per second: its own position, ya
 
 For background actions in the test client, keep the world open and close any inventory, pause menu, or other screen. If the game pauses when unfocused, press F3+P in the test instance to toggle “Pause on Lost Focus” off. The bridge reports an open screen as `screen_opened` and never dismisses or bypasses menus.
 
-Incoming Simple Voice Chat transcription uses the client API's remote entity audio event, sender UUID, and 48 kHz mono PCM16 frames. The bridge keeps at most 200 ms of pre-roll, closes a segment after 700 ms of silence while retaining at most 150 ms of tail, and caps each utterance at eight seconds. It ignores own-player and whisper frames. By default, it posts bounded PCM over authenticated loopback HTTP to the resident STT service; the dedicated token is read from `stt_token_file`. The request has a 20-second timeout and the JSON response is capped at 4 KiB. PCM buffers are cleared after processing, and the service does not retain audio. It accepts only transcripts beginning with the character wake name `Север`; it does not continuously forward ambient conversation. Set `stt_enabled=true` only for the test server after provisioning its separate service token. There is no automatic provider fallback. To use the legacy local CLI explicitly, set `stt_provider=local` and configure valid `ffmpeg_path`, `whisper_cli_path`, and `whisper_model_path`. The resulting author is namespaced as an unverified SVC sender; a matching visible player record is attached as observation metadata without cross-channel identity linking.
+Incoming Simple Voice Chat transcription uses the client API's remote entity audio event, sender UUID, and 48 kHz mono PCM16 frames. The bridge keeps at most 200 ms of pre-roll, closes a segment after 700 ms of silence while retaining at most 150 ms of tail, and caps each utterance at eight seconds. It ignores own-player and whisper frames. It posts bounded PCM over authenticated loopback HTTP to the resident STT service; the dedicated token is read from `stt_token_file`. The request has a 20-second timeout and the JSON response is capped at 4 KiB. PCM buffers are cleared after processing, and the service does not retain audio. It accepts only transcripts beginning with the character wake name `Север`; it does not continuously forward ambient conversation. Set `stt_enabled=true` only for the test server after provisioning its separate service token. The resulting author is namespaced as an unverified SVC sender; a matching visible player record is attached as observation metadata without cross-channel identity linking.
 
 The new observation, movement, and STT paths have offline schema/DB-smoke and Fabric unit/build checks. They have not been exercised in a live game, and no live movement, model inference, or microphone speech was sent during implementation. Restart only the separate test instance to load an updated jar; the primary Minecraft instance is not part of this setup.

@@ -90,7 +90,7 @@ public final class ClientBridge implements ClientModInitializer {
         try {
             instance = this;
             config = BridgeConfig.load();
-            if (config.sttEnabled() && config.sttProvider().equals("service")) {
+            if (config.sttEnabled()) {
                 sttService = new SttServiceClient(http, config.sttUrl(), config.sttToken());
             }
             addressed = ChatAddress.pattern(config.characterName());
@@ -159,9 +159,7 @@ public final class ClientBridge implements ClientModInitializer {
         private void clear(){java.util.Arrays.fill(segment.samples(),(short)0);}
         @Override public void run(){
             try {
-                String transcript = config.sttProvider().equals("service")
-                        ? sttService.transcribe(segment.samples())
-                        : new LocalWhisper(config).transcribe(segment.samples());
+                String transcript = sttService.transcribe(segment.samples());
                 String text = VoiceAddress.extract(transcript,config.characterName());
                 if (text == null || text.isBlank() || text.length() > 1000 || isRecentBotSpeech(text)
                         || !java.util.Objects.equals(activeWorldSessionId,sessionId)) return;
