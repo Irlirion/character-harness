@@ -31,6 +31,7 @@ services:
       OWNER_TOKEN_FILE: /run/secrets/owner_token
       AUDIO_TOKEN_FILE: /run/secrets/audio_token
       BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
+      BRIDGE_CLIENT_WORLD_ENABLED: ${BRIDGE_CLIENT_WORLD_ENABLED:-false}
       CHARACTER_ID: sever
       AUDIENCE_ID: demo-public
       BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO: ${BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO:-false}
@@ -91,9 +92,38 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: "no"
+  tts:
+    build:
+      context: .
+      dockerfile: Dockerfile.tts
+    profiles: [tts]
+    environment:
+      TTS_TOKEN_FILE: /run/secrets/tts_token
+      PIPER_MODEL: /models/ru_RU-dmitri-medium.onnx
+      TTS_HOST: 0.0.0.0
+      TTS_PORT: 3081
+    secrets: [tts_token]
+    volumes:
+      - ${PIPER_MODEL_DIR:-./work/tts-models}:/models:ro
+    networks: [tts_internal]
+    ports: ['127.0.0.1:3081:3081']
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 2.0
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:3081/ready", timeout=1).read()']
+      interval: 5s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
 networks:
   storage: {internal: true}
   agent: {}
+  tts_internal: {}
 volumes:
   postgres_data:
   engine_data:
@@ -106,3 +136,4 @@ secrets:
   model_api_key: {file: ./secrets/model_api_key}
   audio_token: {file: ./secrets/audio_token}
   bridge_token: {file: ./secrets/bridge_token}
+  tts_token: {file: ./secrets/tts_token}
