@@ -7,10 +7,11 @@ import time
 import unittest
 from pathlib import Path
 
-from main import SttServer, SttService, MAX_AUDIO_BYTES, read_token
+from main import SttServer, SttService, MAX_AUDIO_BYTES, MIN_AUDIO_BYTES, read_token
 
 
 TOKEN = "t" * 40
+VALID_PCM = b"\x00\x00" * (MIN_AUDIO_BYTES // 2)
 
 
 class FakeService:
@@ -22,6 +23,14 @@ class FakeService:
 
     def is_ready(self):
         return True
+
+
+class _RecordingRecognizer:
+    def is_loaded(self):
+        return True
+
+    def transcribe(self, samples, sample_rate):
+        return "север"
 
 
 class SttServiceTest(unittest.TestCase):
@@ -69,15 +78,18 @@ class SttServiceTest(unittest.TestCase):
         self.assertEqual(response.status, 413)
         self.assertEqual(json.loads(response.read())["error"], "audio_too_large")
         conn.close()
-        status, body = self.post(b"123")
+        status, body = self.post(b"\x00\x00" * 100)
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["error"], "audio_too_short")
+        status, body = self.post(b"\x00" * (MIN_AUDIO_BYTES + 1))
         self.assertEqual(status, 400)
         self.assertEqual(json.loads(body)["error"], "pcm16_alignment_invalid")
-        status, body = self.post(b"12", content_type="audio/wav")
+        status, body = self.post(VALID_PCM, content_type="audio/wav")
         self.assertEqual(status, 415)
         self.assertEqual(json.loads(body)["error"], "application_octet_stream_required")
 
     def test_valid_pcm_returns_only_transcript_json(self):
-        status, body = self.post(b"\x00\x00" * 100)
+        status, body = self.post(VALID_PCM)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), {"text": "Север здесь."})
 
@@ -87,7 +99,7 @@ class SttServiceTest(unittest.TestCase):
         self.server.service.transcribe = lambda _pcm: (entered.set(), release.wait(2), "готово")[-1]
         result = []
 
-        first = threading.Thread(target=lambda: result.append(self.post(b"\x00\x00" * 100)))
+        first = threading.Thread(target=lambda: result.append(self.post(VALID_PCM)))
         first.start()
         self.assertTrue(entered.wait(2))
 
@@ -129,8 +141,9 @@ class RecognizerConversionTest(unittest.TestCase):
                 captured["sample_rate"] = sample_rate
                 return "север здесь"
 
+        probe = struct.pack("<hhh", -32768, 0, 32767)
         service = SttService(TOKEN, CapturingRecognizer())
-        text = service.transcribe(struct.pack("<hhh", -32768, 0, 32767))
+        text = service.transcribe(probe + b"\x00" * (MIN_AUDIO_BYTES - len(probe)))
 
         self.assertEqual(text, "север здесь")
         self.assertEqual(captured["sample_rate"], 48000)
@@ -156,7 +169,7 @@ class RecognitionFailureTest(unittest.TestCase):
         conn.request(
             "POST",
             "/transcribe",
-            body=b"\x00\x00" * 100,
+            body=VALID_PCM,
             headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/octet-stream"},
         )
         response = conn.getresponse()
@@ -241,6 +254,11 @@ class RecognitionFailureTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "^pcm16_alignment_invalid$"):
             service.transcribe(b"\x01")
         self.assertFalse(reached.is_set())
+
+    def test_too_short_audio_is_a_client_error(self):
+        service = SttService(TOKEN, _RecordingRecognizer())
+        with self.assertRaisesRegex(RuntimeError, "^audio_too_short$"):
+            service.transcribe(b"\x00\x00" * 100)
 
     def test_empty_transcript_is_passed_through(self):
         class SilentRecognizer:

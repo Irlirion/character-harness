@@ -339,7 +339,7 @@ class GigaamRecognizer(Recognizer):
     def transcribe(self, samples, sample_rate: int) -> str:
         if self.model is None:
             raise RuntimeError("gigaam_not_loaded")
-        return self.model.recognize(samples, sample_rate=sample_rate).text
+        return self.model.recognize(samples, sample_rate=sample_rate)
 ```
 
 - [ ] **Step 2: Replace `wait_for_backend` and `main`**

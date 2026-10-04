@@ -1,4 +1,4 @@
-"""Loopback-only, bounded HTTP wrapper around GigaAM v3 CTC transcribing raw PCM16LE."""
+"""Loopback-only, bounded HTTP wrapper around in-process GigaAM v3 CTC transcription."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+MIN_AUDIO_BYTES = 2880  # 30 ms at CAPTURE_SAMPLE_RATE, clear of the GigaAM v3 analysis window
 MAX_AUDIO_BYTES = 768_000  # mono PCM16 for eight seconds at CAPTURE_SAMPLE_RATE
 MAX_TRANSCRIPT_CHARS = 1000
 CAPTURE_SAMPLE_RATE = 48000
@@ -44,6 +45,8 @@ class SttService:
             raise RuntimeError("audio_required")
         if len(audio) % 2:
             raise RuntimeError("pcm16_alignment_invalid")
+        if len(audio) < MIN_AUDIO_BYTES:
+            raise RuntimeError("audio_too_short")
         samples = np.frombuffer(audio, dtype="<i2").astype(np.float32) / PCM_FULL_SCALE
         try:
             text = self.recognizer.transcribe(samples, CAPTURE_SAMPLE_RATE)
@@ -58,12 +61,12 @@ class GigaamRecognizer(Recognizer):
     def __init__(self, model_dir: Path, threads: int):
         self.model_dir = model_dir
         self.threads = max(1, threads)
-        self.model = None
+        self.adapter = None
 
     def is_loaded(self) -> bool:
-        return self.model is not None
+        return self.adapter is not None
 
-    def load(self):
+    def load(self) -> None:
         # Imported here so the contract tests run without onnxruntime or the model.
         import onnx_asr
         import onnxruntime as rt
@@ -71,7 +74,7 @@ class GigaamRecognizer(Recognizer):
         options = rt.SessionOptions()
         options.intra_op_num_threads = self.threads
         options.inter_op_num_threads = 1
-        self.model = onnx_asr.load_model(
+        self.adapter = onnx_asr.load_model(
             "gigaam-v3-ctc",
             self.model_dir,
             quantization="int8",
@@ -80,9 +83,9 @@ class GigaamRecognizer(Recognizer):
         )
 
     def transcribe(self, samples, sample_rate: int) -> str:
-        if self.model is None:
+        if self.adapter is None:
             raise RuntimeError("gigaam_not_loaded")
-        return self.model.recognize(samples, sample_rate=sample_rate).text
+        return self.adapter.recognize(samples, sample_rate=sample_rate)
 
 
 class SttServer(ThreadingHTTPServer):
@@ -158,6 +161,9 @@ class SttHandler(BaseHTTPRequestHandler):
             if length > MAX_AUDIO_BYTES:
                 self.send_json(413, {"error": "audio_too_large"})
                 return
+            if length < MIN_AUDIO_BYTES:
+                self.send_json(400, {"error": "audio_too_short"})
+                return
             if length % 2:
                 self.send_json(400, {"error": "pcm16_alignment_invalid"})
                 return
@@ -200,11 +206,16 @@ def main():
     token = read_token(Path(os.environ.get("STT_TOKEN_FILE", "/run/secrets/stt_token")))
     model_dir = Path(os.environ.get("STT_MODEL_DIR", "/models"))
     threads = int(os.environ.get("STT_CPU_THREADS", "4"))
-    if not model_dir.is_absolute() or not (model_dir / "config.json").is_file():
+    if (
+        not model_dir.is_absolute()
+        or not (model_dir / "config.json").is_file()
+        or not (model_dir / "v3_ctc.int8.onnx").is_file()
+        or not (model_dir / "v3_vocab.txt").is_file()
+    ):
         raise RuntimeError("stt_configuration_invalid")
     recognizer = GigaamRecognizer(model_dir, threads)
     recognizer.load()
-    recognizer.transcribe(np.zeros(1600, dtype=np.float32), 16000)
+    recognizer.transcribe(np.zeros(MIN_AUDIO_BYTES // 2, dtype=np.float32), CAPTURE_SAMPLE_RATE)
 
     service = SttService(token, recognizer)
     bind_host = os.environ.get("STT_HOST", "0.0.0.0")
