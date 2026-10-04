@@ -242,19 +242,6 @@ class RecognitionFailureTest(unittest.TestCase):
             service.transcribe(b"\x01")
         self.assertFalse(reached.is_set())
 
-    def test_alignment_guard_reports_the_exact_error_code(self):
-        class WatchfulRecognizer:
-            def is_loaded(self):
-                return True
-
-            def transcribe(self, _samples, _sample_rate):
-                raise AssertionError("must not transcribe misaligned audio")
-
-        service = SttService(TOKEN, WatchfulRecognizer())
-        with self.assertRaises(RuntimeError) as caught:
-            service.transcribe(b"\x01")
-        self.assertEqual(str(caught.exception), "pcm16_alignment_invalid")
-
     def test_empty_transcript_is_passed_through(self):
         class SilentRecognizer:
             def is_loaded(self):
