@@ -2,6 +2,8 @@ package dev.characterharness.bridge;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import net.minecraft.network.message.FilterMask;
+import net.minecraft.text.Text;
 
 final class ChatAddress {
     private ChatAddress() {}
@@ -17,5 +19,11 @@ final class ChatAddress {
         if (!matcher.find()) return null;
         String text = signedContent.substring(matcher.end()).trim();
         return text.isEmpty() ? null : text;
+    }
+
+    static String extract(String signedContent, FilterMask filterMask, Pattern addressed) {
+        if (signedContent == null || filterMask == null) return null;
+        Text visibleContent = filterMask.getFilteredText(signedContent);
+        return visibleContent == null ? null : extract(visibleContent.getString(), addressed);
     }
 }

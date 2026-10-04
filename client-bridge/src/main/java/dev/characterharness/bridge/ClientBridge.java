@@ -58,7 +58,7 @@ public final class ClientBridge implements ClientModInitializer {
         if (!author.equals(profileId)) return;
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null || client.player.getUuid().equals(author)) return;
-        String text = ChatAddress.extract(signed.getSignedContent(), addressed);
+        String text = ChatAddress.extract(signed.getSignedContent(), signed.filterMask(), addressed);
         if (text == null) return;
         if (text.isEmpty() || text.length() > 1000) return;
         try {
