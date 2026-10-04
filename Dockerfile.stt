@@ -2,8 +2,7 @@ FROM python:3.12-slim-bookworm AS service-tests
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY apps/stt-service/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir "$(grep -m1 '^numpy==' /tmp/requirements.txt)" \
-    && rm /tmp/requirements.txt
+RUN pip install --no-cache-dir "$(grep -m1 '^numpy==' /tmp/requirements.txt)"
 COPY apps/stt-service/main.py /app/main.py
 COPY apps/stt-service/test_main.py /app/test_main.py
 RUN python /app/test_main.py

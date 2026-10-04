@@ -534,8 +534,7 @@ FROM python:3.12-slim-bookworm AS service-tests
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY apps/stt-service/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir "$(grep -m1 '^numpy==' /tmp/requirements.txt)" \
-    && rm /tmp/requirements.txt
+RUN pip install --no-cache-dir "$(grep -m1 '^numpy==' /tmp/requirements.txt)"
 COPY apps/stt-service/main.py /app/main.py
 COPY apps/stt-service/test_main.py /app/test_main.py
 RUN python /app/test_main.py
@@ -614,6 +613,11 @@ The repo's root `Dockerfile:1` puts `pnpm typecheck && pnpm test` in a shared ba
 ```sh
 git add apps/stt-service/requirements.txt Dockerfile.stt
 git commit -m "build(stt): ship GigaAM runtime image without whisper.cpp"
+```
+then, as a second commit, so the build-graph fix is reviewable on its own:
+```sh
+git add Dockerfile.stt
+git commit -m "build(stt): keep contract tests in the default build graph"
 ```
 
 ---
