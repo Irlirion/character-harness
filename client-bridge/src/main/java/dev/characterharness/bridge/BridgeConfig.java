@@ -44,7 +44,7 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
         String sttToken = "";
         if (sttEnabled) {
             String sttTokenPath = properties.getProperty("stt_token_file", "").trim();
-            if (sttTokenPath.isEmpty()) throw new IOException("Set stt_token_file when STT is enabled");
+            if (sttTokenPath.isEmpty()) throw new IOException("Set stt_token_file when STT is enabled (stt_provider was removed; the service is the only provider)");
             sttToken = Files.readString(Path.of(sttTokenPath).toAbsolutePath().normalize()).trim();
             if (sttToken.length() < 32) throw new IOException("STT service token file is invalid");
         }

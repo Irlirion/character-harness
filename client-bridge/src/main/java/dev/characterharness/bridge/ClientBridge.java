@@ -67,7 +67,7 @@ public final class ClientBridge implements ClientModInitializer {
         Thread thread = new Thread(r,"character-harness-observations"); thread.setDaemon(true); return thread;
     });
     private final ThreadPoolExecutor sttIo = new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new LinkedBlockingQueue<>(4),r -> {
-        Thread thread = new Thread(r,"character-harness-local-stt"); thread.setDaemon(true); return thread;
+        Thread thread = new Thread(r,"character-harness-stt"); thread.setDaemon(true); return thread;
     },new ThreadPoolExecutor.AbortPolicy());
     private final PcmSegmenter pcmSegmenter = new PcmSegmenter();
     private final AtomicInteger queuedVoiceFrames=new AtomicInteger();
