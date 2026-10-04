@@ -4,5 +4,7 @@ work/
 secrets/
 data/
 *.log
+/client-bridge/.gradle/
+/client-bridge/build/
 
 .DS_Store

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "character_harness_bridge",
+  "version": "${version}",
+  "name": "Character Harness Bridge",
+  "description": "Forwards addressed chat events to a local Character Harness core.",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["dev.characterharness.bridge.ClientBridge"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "=1.21.11",
+    "fabric-api": ">=0.141.6+1.21.11"
+  }
+}

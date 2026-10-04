@@ -1,4 +1,5 @@
 FROM node:24-bookworm-slim AS dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.11.0 --activate
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./

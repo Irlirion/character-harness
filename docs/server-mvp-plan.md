@@ -1,15 +1,15 @@
 # План до запуска MVP на собственном сервере
 
-Дата: 2026-10-04. Текущий статус: Docker core/PostgreSQL/MCP проверены; реальный модельный turn и внешние адаптеры ещё не проверены. Этот документ задаёт предлагаемые срезы поставки, не календарное обещание.
+Дата: 2026-10-04. Текущий статус: Docker core/PostgreSQL/MCP, Codex turn на `gpt-6-luna` и синтетический ответ в speech queue проверены; client-only Fabric bridge собран и установлен в test instance. Живой игровой цикл ожидает перезапуска экземпляра и ручной проверки. Этот документ задаёт предлагаемые срезы поставки, не календарное обещание.
 
 ## Подтверждённое окружение
 
 - Minecraft Java 1.21.11, Fabric; Simple Voice Chat 2.6.24 — подтверждено пользователем.
 - Docker работает на Mac. Сервер поддерживает нелицензионный вход; конкретный auth mode для бота надо проверить при подключении.
 - Для MVP пользователь хочет использовать подписку Codex; TTS/STT ещё не выбраны.
-- Установка server addon не подтверждена. Виртуальный микрофон рассматривается как альтернативный путь, требующий реального Minecraft-клиента с SVC.
-- Mineflayer upstream заявляет поддержку 1.21.11; фактический вход и моды сервера проверяются отдельным spike.
-- Голосовой transport пока не закреплён. Server addon сохраняет Mineflayer и Docker topology; client-only путь требует отдельного spike и может потребовать клиентского Fabric bridge вместо Mineflayer.
+- Пользователь запретил server addon. Выбран native Fabric client bridge в отдельном Prism instance, с отдельным token к core.
+- Исходящий voice transport подтверждён через test client Simple Voice Chat 2.6.24 и native audio worker; synthetic Codex response completed в speech queue.
+- Mineflayer и server-addon ветка этого плана заменены client-only путем; установленный bridge ожидает перезапуска test instance и live chat проверки.
 
 ## Целевой результат
 
@@ -70,3 +70,7 @@ Codex-адаптер, произвольное самокодирование, �
 ## Подтверждённый исходящий voice transport
 
 Пользователь подтвердил слышимость тестовой фразы на сервере через native PrismLauncher instance и Loopback. Для MVP выбранное направление — Docker харнес/engine/сервисы + native Minecraft client и audio worker на Mac; ручной путь уже проверен, автоматический worker ещё не реализован. Server addon не нужен для этого пути. Полная автономность, STT и игровые команды не подтверждены данным тестом.
+
+## Текущий прогресс
+
+Codex отдельный login и закреплённая модель `gpt-6-luna` проверены. Один synthetic event прошёл engine turn, ответ и автоматическую speech очередь до `completed`. Fabric bridge установлен только в `character-harness-test`; следующий шаг — перезапуск тестового клиента и реальный обращённый игроком текст. Telegram, STT, движение и автономные обязанности остаются вне этого среза.

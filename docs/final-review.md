@@ -40,4 +40,10 @@
 
 ## Автоматический голос: второй срез
 
-Добавлены speech_jobs, owner speech API, отдельный audio token, native macOS worker и Swift CoreAudio playback. Пользователь подтвердил слышимость автоматической фразы через Loopback и SVC на сервере. Прошли Docker typecheck/policy tests и speech queue smoke (роль токена, replay/conflict, один claim, отмена/pause, лимит очереди, unknown без повторной выдачи). Это не проверка автономного разговора; игровой bridge и Codex engine ещё не реализованы. Инструкция: [audio worker](audio-worker.md).
+Добавлены speech_jobs, owner speech API, отдельный audio token, native macOS worker и Swift CoreAudio playback. Пользователь подтвердил слышимость автоматической фразы через Loopback и SVC на сервере. Прошли Docker typecheck/policy tests и speech queue smoke (роль токена, replay/conflict, один claim, отмена/pause, лимит очереди, unknown без повторной выдачи). Инструкция: [audio worker](audio-worker.md).
+
+## Codex и первый игровой цикл
+
+Codex app-server 0.160 запускается с изолированным `CODEX_HOME`, device login через ChatGPT subscription и только ограниченным MCP набором состояния/памяти. Authenticated `model/list` подтвердил точную модель `gpt-6-luna`; выбор модели не переходит к account default, если Luna недоступна. Docker Node 24 typecheck и policy/RPC/model tests прошли. Синтетическое событие прошло реальный Codex turn, сохранило ответ и создало speech job со статусом completed через native audio worker.
+
+Собран client-only Fabric bridge для 1.21.11 / Fabric API 0.141.6 / SVC 2.6.24; server mod не используется. Он передаёт только адресованный игровой текст с UUID из серверного chat context и локально показывает ответ. Отдельный bridge token не даёт доступа к owner/MCP API. Jar и минимальная конфигурация установлены только в `character-harness-test`. Live chat проверка ждёт перезапуска этого экземпляра. UUID не объявляется проверенной личностью, особенно на offline-mode сервере.

@@ -30,9 +30,11 @@ services:
       ENGINE_TOKEN_FILE: /run/secrets/engine_token
       OWNER_TOKEN_FILE: /run/secrets/owner_token
       AUDIO_TOKEN_FILE: /run/secrets/audio_token
+      BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
       CHARACTER_ID: sever
       AUDIENCE_ID: demo-public
-    secrets: [database_url, engine_token, owner_token, audio_token]
+      BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO: ${BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO:-false}
+    secrets: [database_url, engine_token, owner_token, audio_token, bridge_token]
     networks: [storage, agent]
     ports: ['127.0.0.1:3000:3000']
     depends_on:
@@ -69,12 +71,33 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
+  codex-engine:
+    build: .
+    command: [node, --experimental-strip-types, apps/codex-engine/main.ts]
+    profiles: [codex]
+    environment:
+      CORE_URL: http://core:3000
+      ENGINE_TOKEN_FILE: /run/secrets/engine_token
+      HARNESS_CODEX_HOME: /data/codex
+      CODEX_MODEL: ${CODEX_MODEL:-gpt-6-luna}
+    secrets: [engine_token]
+    volumes: [codex_data:/data]
+    networks: [agent]
+    depends_on:
+      core: {condition: service_healthy}
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
 networks:
   storage: {internal: true}
   agent: {}
 volumes:
   postgres_data:
   engine_data:
+  codex_data:
 secrets:
   db_password: {file: ./secrets/db_password}
   database_url: {file: ./secrets/database_url}
@@ -82,3 +105,4 @@ secrets:
   owner_token: {file: ./secrets/owner_token}
   model_api_key: {file: ./secrets/model_api_key}
   audio_token: {file: ./secrets/audio_token}
+  bridge_token: {file: ./secrets/bridge_token}
