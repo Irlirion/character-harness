@@ -2,7 +2,7 @@
 
 Харнес для автономных персонажей, которые действуют в Minecraft, Telegram и других средах, сохраняют память и расширяют свои возможности.
 
-Статус 2026-10-04: Docker core/MCP/PostgreSQL и native audio worker проверены; Codex изолированно вошёл через ChatGPT подписку; authenticated `model/list` подтвердил закреплённую `gpt-6-luna`; синтетическое событие прошло Codex→reply→completed speech job. Client-only Fabric bridge собран и добавлен в отдельный Prism test instance. Для игровых сообщений через SYSTEM/GAME предусмотрен отдельный opt-in adapter только для `mc.agicraft.ru:25565` и `demo-public`; никнейм сохраняется как недоверенная личность. Live циклу нужен перезапуск test instance и проверка игроком. Server addon не нужен.
+Статус 2026-10-04: Docker core/MCP/PostgreSQL и native audio worker проверены; Codex изолированно вошёл через ChatGPT подписку; authenticated `model/list` подтвердил закреплённую `gpt-6-luna`; синтетическое событие прошло Codex→reply→completed speech job. Client-only Fabric bridge собран и добавлен в отдельный Prism test instance. Для игровых сообщений через SYSTEM/GAME предусмотрен отдельный opt-in adapter только для `mc.agicraft.ru:25565` и `demo-public`; никнейм сохраняется как недоверенная личность. Живое адресованное сообщение игрока доставлено bridge в core и принято как `minecraft_system_chat` для `demo-public`; полный цикл от живого сообщения до озвученного ответа не завершён, потому что лимит подписки ChatGPT был исчерпан. Server addon не нужен.
 
 Главная цель MVP — социальный вау-эффект для участников Minecraft-сервера и Telegram: узнаваемый персонаж с памятью, характером и уместной инициативой.
 
