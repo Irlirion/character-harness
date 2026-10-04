@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { secret } from '../../packages/domain/secrets.ts';
-import { DomainError, matchesToken } from '../../packages/domain/policy.ts';
+import { DomainError, matchesToken, requestPath, requiredRole } from '../../packages/domain/policy.ts';
 import { pool, status, search, remember, control, ingest, nextEvent, complete } from '../../packages/storage/db.ts';
 import { enqueueSpeech, claimSpeech, speechState, updateSpeech } from '../../packages/storage/speech.ts';
 import { BridgeEventScopeError, parseBridgeEvent } from '../../packages/domain/bridge-event.ts';
@@ -29,9 +29,13 @@ await pool.query(`INSERT INTO characters(id,name,persona) VALUES($1,$2,$3)
 app.addHook('onRequest', async (req, reply) => {
   // No browser access is needed in this slice. Reject Origin instead of offering permissive CORS.
   if (req.headers.origin) return reply.code(403).send({ error: 'browser_access_disabled' });
-  if (req.url === '/health') return;
-  const required = req.url.startsWith('/owner/') ? ownerToken : req.url.startsWith('/audio/') ? audioToken : req.url.startsWith('/bridge/') ? bridgeToken : engineToken;
-  if (!matchesToken(req.headers.authorization, required)) return reply.code(401).send({ error: 'unauthorized' });
+  const path = requestPath(req.url);
+  if (path === '/health') return;
+  // Derive the required token from the resolved path, never from the raw request target:
+  // an unmatched path has no role and must not fall back to the engine token.
+  const role = requiredRole(path);
+  const required = role === 'owner' ? ownerToken : role === 'audio' ? audioToken : role === 'bridge' ? bridgeToken : role === 'engine' ? engineToken : null;
+  if (required === null || !matchesToken(req.headers.authorization, required)) return reply.code(401).send({ error: 'unauthorized' });
 });
 app.setErrorHandler((error, _req, reply) => {
   if (error instanceof DomainError) return reply.code(409).send({ error: error.code });
