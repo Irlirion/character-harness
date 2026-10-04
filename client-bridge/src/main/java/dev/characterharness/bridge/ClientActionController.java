@@ -35,8 +35,10 @@ final class ClientActionController {
         if (active != null) { completion.accept(action, result("failed", "client_action_busy")); return; }
         if (System.currentTimeMillis() >= action.expiresAtMs()) { completion.accept(action, result("cancelled", "action_expired_before_start")); return; }
         if (!currentSession.test(action.sessionId())) { completion.accept(action,result("cancelled","world_session_mismatch")); return; }
-        if (client.player == null || client.world == null || client.getNetworkHandler() == null || client.currentScreen != null) {
-            completion.accept(action, result("failed", "client_not_ready")); return;
+        String readinessFailure = startReadinessFailure(client.player != null, client.world != null,
+                client.getNetworkHandler() != null, client.currentScreen != null);
+        if (readinessFailure != null) {
+            completion.accept(action, result("failed", readinessFailure)); return;
         }
         if (client.options.forwardKey.isPressed() || client.options.backKey.isPressed()
                 || client.options.leftKey.isPressed() || client.options.rightKey.isPressed()) {
@@ -163,6 +165,11 @@ final class ClientActionController {
     private static Result result(String state, String reason) {
         JsonObject evidence = new JsonObject(); evidence.addProperty("reason", reason);
         return new Result(state, evidence);
+    }
+
+    static String startReadinessFailure(boolean hasPlayer, boolean hasWorld, boolean hasNetworkHandler, boolean screenOpen) {
+        if (!hasPlayer || !hasWorld || !hasNetworkHandler) return "client_not_ready";
+        return screenOpen ? "screen_opened" : null;
     }
 
 }
