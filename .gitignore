@@ -6,5 +6,7 @@ data/
 *.log
 /client-bridge/.gradle/
 /client-bridge/build/
+__pycache__/
+*.py[cod]
 
 .DS_Store
