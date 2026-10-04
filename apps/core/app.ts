@@ -208,7 +208,7 @@ function gateway() {
     catch (error) { if (!(error instanceof DomainError)) throw error; return { ...result({error:error.code}), isError:true }; }
   });
   server.registerTool('agent_turn', {
-    description: 'Turn the local character by a small relative yaw/pitch. Positive Minecraft yaw turns west; negative yaw turns east. Use nearby players bearing_degrees as a relative yaw target. This queues an action; use agent_action_status and only say it succeeded after state=completed. No teleport or chat commands.',
+    description: 'Turn the local character camera by a small relative yaw/pitch; this does not require grounded/support/collision checks (those gate walking only). Positive Minecraft yaw turns west; negative yaw turns east. Use a nearby player bearing_degrees as the relative yaw target. Maximum per call is 90 degrees yaw and 30 degrees pitch; if the target bearing exceeds that, turn by 90 degrees toward the target, observe again, then turn the remainder. This queues an action; use agent_action_status and only say it succeeded after state=completed. No teleport or chat commands.',
     inputSchema: { yaw_degrees:z.number().min(-90).max(90), pitch_degrees:z.number().min(-30).max(30), invocation_id:z.string().min(1).max(200), expected_epoch:z.number().int().positive() }
   }, async ({yaw_degrees,pitch_degrees,invocation_id,expected_epoch}) => {
     if (!allowClientWorld) return { ...result({error:'client_world_disabled'}), isError:true };
