@@ -586,7 +586,20 @@ docker images | grep character-harness-stt
 ```
 Expected: the build succeeds and the image is listed.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Assert the default build runs the contract tests**
+
+Run:
+```sh
+docker build --no-cache -f Dockerfile.stt -t character-harness-stt:latest . 2>&1 | tee /tmp/stt-build.log
+grep -c "Ran 14 tests" /tmp/stt-build.log
+```
+Expected: `1` or more. **If it prints `0`, stop and fix `Dockerfile.stt` before committing.** It means the `runtime` stage has no dependency edge on `service-tests`, so BuildKit pruned the test stage as a non-ancestor and the build shipped untested code behind a green result. The one-line cause is a `COPY apps/stt-service/main.py /app/main.py` in the `runtime` stage in place of `COPY --from=service-tests /app/main.py /app/main.py`.
+
+This step exists because Steps 3 and 4 structurally cannot detect that failure. Both pass an explicit `--target`, so each builds only the stage it names and neither pulls `service-tests` into its graph; each would report success with the test stage pruned. The default build is the one `docker compose build stt` actually performs, so it is the only one of the three that reproduces the real build.
+
+`--no-cache` is required, not a speed concession. On a fully cached build BuildKit reports each step as `CACHED` and does not replay its stdout, so `grep -c "Ran 14 tests"` returns `0` even when the graph is correct. Without `--no-cache` this assertion fails for the wrong reason and gets deleted instead of fixed.
+
+- [ ] **Step 6: Commit**
 
 ```sh
 git add apps/stt-service/requirements.txt Dockerfile.stt
