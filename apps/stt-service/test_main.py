@@ -20,9 +20,6 @@ class FakeService:
         self.inference_slot = threading.Lock()
         self.transcribe = transcribe or (lambda _audio: "Север здесь.")
 
-    def is_loaded(self):
-        return True
-
     def is_ready(self):
         return True
 
@@ -207,6 +204,16 @@ class RecognitionFailureTest(unittest.TestCase):
 
         self.assertEqual(self.transcribe(self.serve(WideRecognizer())), (200, {"text": "\U0001f600" * 1000}))
 
+    def test_non_string_transcript_is_rejected(self):
+        class BrokenRecognizer:
+            def is_loaded(self):
+                return True
+
+            def transcribe(self, _samples, _sample_rate):
+                return None
+
+        self.assertEqual(self.transcribe(self.serve(BrokenRecognizer())), (502, {"error": "stt_recognition_failed"}))
+
     def test_unloaded_recognizer_is_never_ready(self):
         class DarkRecognizer:
             def is_loaded(self):
@@ -217,7 +224,7 @@ class RecognitionFailureTest(unittest.TestCase):
 
         self.assertEqual(self.readiness(self.serve(DarkRecognizer())), (503, {"ready": False}))
 
-    def test_empty_audio_is_refused_before_recognition(self):
+    def test_empty_and_misaligned_audio_are_refused_before_recognition(self):
         reached = threading.Event()
 
         class WatchfulRecognizer:
@@ -229,8 +236,10 @@ class RecognitionFailureTest(unittest.TestCase):
                 return "север"
 
         service = SttService(TOKEN, WatchfulRecognizer())
-        with self.assertRaisesRegex(RuntimeError, "stt_audio_required"):
+        with self.assertRaisesRegex(RuntimeError, "audio_required"):
             service.transcribe(b"")
+        with self.assertRaisesRegex(RuntimeError, "pcm16_alignment_invalid"):
+            service.transcribe(b"\x01")
         self.assertFalse(reached.is_set())
 
     def test_empty_transcript_is_passed_through(self):

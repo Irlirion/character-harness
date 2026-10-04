@@ -16,7 +16,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-MAX_AUDIO_BYTES = 768_000  # mono PCM16 at 48 kHz for eight seconds
+MAX_AUDIO_BYTES = 768_000  # mono PCM16 for eight seconds at CAPTURE_SAMPLE_RATE
 MAX_TRANSCRIPT_CHARS = 1000
 CAPTURE_SAMPLE_RATE = 48000
 PCM_FULL_SCALE = 32768.0
@@ -45,9 +45,11 @@ class SttService:
         return self.recognizer.is_loaded()
 
     def transcribe(self, audio: bytes) -> str:
+        if len(audio) == 0:
+            raise RuntimeError("audio_required")
+        if len(audio) % 2:
+            raise RuntimeError("pcm16_alignment_invalid")
         samples = np.frombuffer(audio, dtype="<i2").astype(np.float32) / PCM_FULL_SCALE
-        if samples.size == 0:
-            raise RuntimeError("stt_audio_required")
         try:
             text = self.recognizer.transcribe(samples, CAPTURE_SAMPLE_RATE)
         except Exception as error:
