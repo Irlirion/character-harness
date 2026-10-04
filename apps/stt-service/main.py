@@ -7,21 +7,17 @@ import json
 import numpy as np
 import os
 import signal
-import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
-import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 MAX_AUDIO_BYTES = 768_000  # mono PCM16 at 48 kHz for eight seconds
 MAX_TRANSCRIPT_CHARS = 1000
-MAX_TRANSCRIPT_BYTES = 4000
 CAPTURE_SAMPLE_RATE = 48000
 PCM_FULL_SCALE = 32768.0
 BACKEND_STARTUP_TIMEOUT_SECONDS = 60
@@ -56,11 +52,7 @@ class SttService:
             text = self.recognizer.transcribe(samples, CAPTURE_SAMPLE_RATE)
         except Exception as error:
             raise RuntimeError("stt_recognition_failed") from error
-        if (
-            not isinstance(text, str)
-            or len(text) > MAX_TRANSCRIPT_CHARS
-            or len(text.encode("utf-8")) > MAX_TRANSCRIPT_BYTES
-        ):
+        if not isinstance(text, str) or len(text) > MAX_TRANSCRIPT_CHARS:
             raise RuntimeError("stt_recognition_failed")
         return text
 

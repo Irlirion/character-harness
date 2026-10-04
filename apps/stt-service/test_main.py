@@ -7,8 +7,6 @@ import time
 import unittest
 from pathlib import Path
 
-import numpy as np
-
 from main import SttServer, SttService, MAX_AUDIO_BYTES, read_token
 
 
@@ -199,17 +197,15 @@ class RecognitionFailureTest(unittest.TestCase):
 
         self.assertEqual(self.transcribe(self.serve(LoudRecognizer())), (502, {"error": "stt_recognition_failed"}))
 
-    def test_widest_transcript_within_the_char_budget_is_accepted(self):
-        widest = "\U0001f600" * 1000  # four UTF-8 bytes each, so exactly MAX_TRANSCRIPT_BYTES
-
+    def test_char_limit_is_the_only_transcript_bound(self):
         class WideRecognizer:
             def is_loaded(self):
                 return True
 
             def transcribe(self, _samples, _sample_rate):
-                return widest
+                return "\U0001f600" * 1000
 
-        self.assertEqual(self.transcribe(self.serve(WideRecognizer())), (200, {"text": widest}))
+        self.assertEqual(self.transcribe(self.serve(WideRecognizer())), (200, {"text": "\U0001f600" * 1000}))
 
     def test_unloaded_recognizer_is_never_ready(self):
         class DarkRecognizer:
