@@ -25,7 +25,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class ClientBridge implements ClientModInitializer {
@@ -43,26 +42,24 @@ public final class ClientBridge implements ClientModInitializer {
     @Override public void onInitializeClient() {
         try {
             config = BridgeConfig.load();
-            addressed = Pattern.compile("^\\s*(?:@" + Pattern.quote(config.characterName()) + "\\b\\s*[:,]?\\s*|"
-                    + Pattern.quote(config.characterName()) + "\\s*[:,]\\s*)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+            addressed = ChatAddress.pattern(config.characterName());
         } catch (Exception error) {
             LOG.log(System.Logger.Level.ERROR, "Bridge disabled: {0}", error.getMessage());
             return;
         }
-        ClientReceiveMessageEvents.CHAT.register((message, signed, sender, params, received) -> onChat(message.getString(), signed, sender == null ? null : sender.id(), received));
+        ClientReceiveMessageEvents.CHAT.register((message, signed, sender, params, received) -> onChat(signed, sender == null ? null : sender.id(), received));
         io.scheduleWithFixedDelay(this::pollReplies, 1, 1, TimeUnit.SECONDS);
         LOG.log(System.Logger.Level.INFO, "Bridge enabled for addressed chat; account UUIDs are forwarded as supplied by the server chat context.");
     }
 
-    private void onChat(String original, SignedMessage signed, UUID profileId, Instant received) {
+    private void onChat(SignedMessage signed, UUID profileId, Instant received) {
         if (signed == null || signed.isSenderMissing() || profileId == null) return;
         UUID author = signed.getSender();
         if (!author.equals(profileId)) return;
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null || client.player.getUuid().equals(author)) return;
-        Matcher matcher = addressed.matcher(original);
-        if (!matcher.find()) return;
-        String text = original.substring(matcher.end()).trim();
+        String text = ChatAddress.extract(signed.getSignedContent(), addressed);
+        if (text == null) return;
         if (text.isEmpty() || text.length() > 1000) return;
         try {
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));

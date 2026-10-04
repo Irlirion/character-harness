@@ -26,6 +26,8 @@ character_name=Север
 token_file=/absolute/path/to/character-harness/secrets/bridge_token
 ```
 
+`core_url` must be plain HTTP on exactly `127.0.0.1` or `localhost` with an explicit port from 1 to 65535. Credentials, any path other than `/`, query strings and fragments are rejected before the bridge token is read.
+
 Start core, the Codex profile and the native audio worker, then restart only the test Minecraft instance. In-game, address the character with `@Север привет` or `Север: привет`. Only addressed messages are forwarded. The mod ignores messages from its own player UUID.
 
 The bridge sends the UUID provided with the server chat message context, not a player nickname or a log-parser match. That UUID is a server-provided profile identifier; on offline-mode servers it does not prove a Mojang account identity. It must not be used for cross-channel identity or private-memory access.

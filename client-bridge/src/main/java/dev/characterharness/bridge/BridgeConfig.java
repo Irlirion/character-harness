@@ -3,6 +3,8 @@ package dev.characterharness.bridge;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
@@ -16,17 +18,40 @@ record BridgeConfig(String coreUrl, String token, String characterName) {
         }
         Properties properties = new Properties();
         try (var reader = Files.newBufferedReader(path)) { properties.load(reader); }
+        String coreUrl = normalizeCoreUrl(properties.getProperty("core_url", "http://127.0.0.1:3000").trim());
         String tokenPath = properties.getProperty("token_file", "").trim();
         if (tokenPath.isEmpty()) throw new IOException("Set token_file in config/character-harness-bridge.properties");
         Path file = Path.of(tokenPath).toAbsolutePath().normalize();
         String token = Files.readString(file).trim();
         if (token.length() < 32) throw new IOException("Bridge token file is invalid");
-        String coreUrl = properties.getProperty("core_url", "http://127.0.0.1:3000").trim().replaceAll("/$", "");
         String characterName = properties.getProperty("character_name", "Север").trim();
-        if (!coreUrl.startsWith("http://127.0.0.1:") && !coreUrl.startsWith("http://localhost:")) {
-            throw new IOException("core_url must use local loopback HTTP");
-        }
         if (characterName.isEmpty() || characterName.length() > 32) throw new IOException("character_name is invalid");
         return new BridgeConfig(coreUrl, token, characterName);
+    }
+
+    static String normalizeCoreUrl(String value) throws IOException {
+        final URI uri;
+        try {
+            uri = new URI(value);
+        } catch (URISyntaxException error) {
+            throw new IOException("core_url must be a valid loopback HTTP URL", error);
+        }
+        String host = uri.getHost();
+        int port = uri.getPort();
+        String path = uri.getRawPath();
+        if (!"http".equalsIgnoreCase(uri.getScheme())
+                || !isLoopbackHost(host)
+                || uri.getRawUserInfo() != null
+                || port < 1 || port > 65535
+                || uri.getRawQuery() != null
+                || uri.getRawFragment() != null
+                || !(path == null || path.isEmpty() || "/".equals(path))) {
+            throw new IOException("core_url must be loopback HTTP with a valid port and no credentials, path, query, or fragment");
+        }
+        return "http://" + host.toLowerCase(java.util.Locale.ROOT) + ":" + port;
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        return host != null && ("127.0.0.1".equals(host) || "localhost".equalsIgnoreCase(host));
     }
 }
