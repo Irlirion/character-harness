@@ -13,7 +13,9 @@ const principal = { characterId: process.env.CHARACTER_ID ?? 'sever', audienceId
 const engineToken = secret('ENGINE_TOKEN');
 const ownerToken = secret('OWNER_TOKEN');
 const audioToken = secret('AUDIO_TOKEN');
+const bridgeToken = secret('BRIDGE_TOKEN');
 if (audioToken.length < 32 || audioToken === ownerToken || audioToken === engineToken) throw new Error('Distinct audio token required');
+if (bridgeToken.length < 32 || new Set([bridgeToken, ownerToken, engineToken, audioToken]).size !== 4) throw new Error('Distinct bridge token required');
 if (engineToken.length < 32 || ownerToken.length < 32 || engineToken === ownerToken) throw new Error('Distinct tokens of at least 32 characters required');
 const character = z.object({ id: z.string(), name: z.string(), persona: z.string() }).parse(
   JSON.parse(await readFile(process.env.CHARACTER_FILE ?? 'characters/sever.json', 'utf8')));
@@ -24,7 +26,7 @@ app.addHook('onRequest', async (req, reply) => {
   // No browser access is needed in this slice. Reject Origin instead of offering permissive CORS.
   if (req.headers.origin) return reply.code(403).send({ error: 'browser_access_disabled' });
   if (req.url === '/health') return;
-  const required = req.url.startsWith('/owner/') ? ownerToken : req.url.startsWith('/audio/') ? audioToken : engineToken;
+  const required = req.url.startsWith('/owner/') ? ownerToken : req.url.startsWith('/audio/') ? audioToken : req.url.startsWith('/bridge/') ? bridgeToken : engineToken;
   if (!matchesToken(req.headers.authorization, required)) return reply.code(401).send({ error: 'unauthorized' });
 });
 app.setErrorHandler((error, _req, reply) => {
@@ -35,6 +37,7 @@ app.setErrorHandler((error, _req, reply) => {
 });
 app.get('/health', async () => ({ alive: true }));
 app.get('/ready', async () => { await pool.query('SELECT 1'); return { ready: true }; });
+app.get('/engine/status', async () => status(principal));
 app.get('/owner/status', async () => ({ character: await status(principal), audience: principal.audienceId, adapters: { minecraft: 'not_implemented', telegram: 'not_implemented', voice: 'not_implemented' } }));
 app.post('/owner/pause', async () => control(principal, true));
 app.post('/owner/resume', async () => control(principal, false));
@@ -59,6 +62,22 @@ app.post('/owner/events', async req => ingest(principal, z.object({
   source_key: z.string().min(1).max(200), author_id: z.string().min(1).max(200),
   text: z.string().min(1).max(4000), reply_to: z.string().max(200).optional()
 }).strict().parse(req.body)));
+app.post('/bridge/events', async req => ingest(principal, z.object({
+  source_key:z.string().regex(/^minecraft:[^\s]{1,300}$/), author_id:z.string().uuid(),
+  text:z.string().min(1).max(1000)
+}).strict().parse(req.body)));
+app.get('/bridge/replies', async () => (await pool.query(`SELECT e.id,e.author_id,r.text
+  FROM social_events e JOIN replies r ON r.event_id=e.id
+  WHERE e.character_id=$1 AND e.audience_id=$2 AND e.source_key LIKE 'minecraft:%' AND NOT e.reply_delivered
+  ORDER BY e.created_at,e.id LIMIT 20`,[principal.characterId,principal.audienceId])).rows);
+app.post('/bridge/replies/:id/ack', async req => {
+  const id=z.string().uuid().parse((req.params as {id:string}).id);
+  const result=await pool.query(`UPDATE social_events SET reply_delivered=true
+    WHERE id=$1 AND character_id=$2 AND audience_id=$3 AND source_key LIKE 'minecraft:%' AND processed
+    AND EXISTS(SELECT 1 FROM replies WHERE event_id=$1)`,[id,principal.characterId,principal.audienceId]);
+  if(!result.rowCount)throw new DomainError('reply_not_found');
+  return {acknowledged:true};
+});
 app.get('/owner/replies', async () => (await pool.query(`SELECT e.id,e.author_id,e.text AS input,r.text AS reply
   FROM social_events e LEFT JOIN replies r ON r.event_id=e.id
   WHERE e.character_id=$1 AND e.audience_id=$2 ORDER BY e.created_at DESC LIMIT 20`, [principal.characterId, principal.audienceId])).rows);
@@ -70,8 +89,8 @@ app.get('/engine/input', async (_req, reply) => {
     event: state.paused ? null : event, memories: await search(principal, '') };
 });
 app.post('/engine/complete', async req => {
-  const body = z.object({ event_id: z.string().uuid(), text: z.string().max(8000), epoch: z.number().int().positive() }).strict().parse(req.body);
-  await complete(principal, body.event_id, body.text, body.epoch);
+  const body = z.object({ event_id: z.string().uuid(), text: z.string().min(1).max(8000), epoch: z.number().int().positive(), speak: z.boolean().default(false) }).strict().parse(req.body);
+  await complete(principal, body.event_id, body.text, body.epoch, body.speak);
   return { saved: true };
 });
 function gateway() {

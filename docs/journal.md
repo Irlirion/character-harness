@@ -90,3 +90,10 @@
 - Пользователь указал https://github.com/Irlirion/character-harness как репозиторий проекта.
 - Remote на момент проверки не содержит refs; локальный проект до этого не был Git checkout.
 - Локальные credentials, рабочее аудио, node_modules и данные исключены из версионирования.
+
+### Codex и игровой client bridge
+
+- Добавлены Codex app-server runtime с изолированным ChatGPT device login, ограниченным MCP каталогом и закреплённой моделью `gpt-6-luna`. Authenticated `model/list` подтвердил доступность модели; inference не переходит на account default.
+- Исправлен turn-fence endpoint, добавлена атомарная запись ответа вместе со speech job и короткой речевой репликой. Синтетический event прошёл реальный Codex turn и native audio worker до `completed`; это не новая проверка слышимости вторым игроком.
+- Реализован client-only Fabric bridge для 1.21.11/Fabric API 0.141.6. Он принимает адресованное сообщение с UUID из server chat context через отдельный token, возвращает локальный ответ и подтверждает его доставку. Server addon не нужен.
+- Выполнены Docker Node24 typecheck/policy/RPC/model tests, isolated auth/model check, bridge auth/UUID validation check и Fabric Gradle build. Живой игровой event ожидает перезапуска отдельного test instance и проверки игроком.

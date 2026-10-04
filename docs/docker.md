@@ -1,23 +1,24 @@
 # Запуск в Docker
 
-Дата: 2026-10-03. Обязательное требование пользователя. Статус: Dockerfile и Compose добавлены для первого среза; build/runtime ещё не проверены.
+Дата обновления: 2026-10-04. Статус: Docker core/PostgreSQL, Pi profile и Codex profile собираются на Node 24; Codex использует отдельный ChatGPT device login и `gpt-6-luna`. На Mac вне Docker работают native Minecraft Fabric client и audio worker. Telegram и Docker-only Minecraft client не реализованы.
 
 ## Базовая топология
 
 - core: доверенный Linux-контейнер Node.js 24, control plane, MCP HTTP и будущие адаптеры сред.
 - engine: отдельный контейнер Pi, который не получает credentials БД или игровых аккаунтов; обращается к core через аутентифицированный MCP HTTP.
+- codex-engine: отдельный profile container, isolated Codex app-server login, ограниченные MCP tools и отдельный `codex_data` volume.
 - postgres: отдельный контейнер PostgreSQL 18 с постоянным volume.
 - migrate: одноразовый запуск того же образа приложения для миграций БД.
-- telegram-login: одноразовый интерактивный запуск того же образа для авторизации аккаунта, без включения кодов и паролей в модель или логи.
-- minecraft: необязательный тестовый сервер в Compose profile; рабочий сервер может находиться снаружи.
+- Minecraft: native Fabric client-only bridge в отдельном Prism test instance, отдельный bridge token, без server addon.
+- Audio: native Node/Swift worker на Mac, Loopback и клиентский SVC.
 
-Node.js и Pi на хосте для обычного запуска не нужны. Первый сценарий использует внешнего модельного провайдера. Локальная модель подключается отдельным сервисом или endpoint и не обязательна для базового Compose.
+Для Docker core и engines Node.js на хосте не нужен. На Mac native audio worker требует Node 24 и Swift toolchain; native game client управляется через PrismLauncher. Первый игровой срез использует Codex subscription через собственный device login.
 
-Codex engine добавляется через отдельный target образа с закреплённым CLI/runtime; авторизация и состояние сохраняются отдельно. Наличие входа в Codex на хосте не означает авторизации внутри контейнера. Поддержка amd64/arm64 проверяется для каждого target.
+Codex CLI/runtime поставляется через закреплённый пакет; авторизация хранится в отдельном `codex_data`, вход на хосте не копируется. Проверена модель `gpt-6-luna`; недоступная модель приводит к ошибке запуска без fallback.
 
 ## Постоянные данные
 
-PostgreSQL хранит персонажей, события, задачи, память и операции. Отдельный volume engine-data содержит workspace экземпляров, сессии движков, артефакты и версии навыков. Volume telegram-auth содержит авторизованные Telegram-сессии и доступен только соответствующим workers. Конфигурация персонажей монтируется read-only; секреты не находятся в образе или репозитории.
+PostgreSQL хранит персонажей, события, память, ответы и речь. Отдельные `engine_data`/`codex_data` volumes хранят изолированное runtime-состояние. Telegram-сессия пока отсутствует. Конфигурация персонажа монтируется read-only; секреты не находятся в образе или репозитории.
 
 Удаление и пересоздание контейнера сохраняет биографию и сессии. Удаление volumes является отдельной разрушительной операцией. Резервная копия должна включать БД и файловое состояние с согласованной контрольной точкой.
 
@@ -31,7 +32,7 @@ PostgreSQL healthcheck предшествует migrate; core запускает
 
 ## Остановка и перезапуск
 
-Контейнер использует init и обрабатывает SIGTERM: прекращает новые turns, отменяет активные навыки, сохраняет контрольные точки и закрывает подключения. После запуска просроченные leases восстанавливаются, внешние операции сверяются. Успех при потере процесса не предполагается автоматически.
+Контейнер использует init и обрабатывает SIGTERM: останавливает Codex app-server child и закрывает подключения. Core fencing отзывает turn при pause/смене epoch; stale results не сохраняются. После запуска просроченная речь истекает, внешние эффекты со status unknown автоматически не повторяются.
 
 ## Мастерская
 
@@ -58,6 +59,6 @@ PostgreSQL healthcheck предшествует migrate; core запускает
 
 ## Simple Voice Chat
 
-Голосовой bridge устанавливается в Minecraft-сервер как addon/plugin. Для тестового сервера публикуется настроенный voice UDP порт; TTS и связь core с bridge работают без аудиоустройств хоста. Сервер и harness могут находиться на разных хостах. [Спецификация](integrations/minecraft-voice.md).
+Server addon запрещён. Тестовый client bridge работает в установленном Fabric клиенте на Mac; native audio worker подаёт речь в Loopback, который использует локальный SVC клиент. Серверный voice endpoint уже проверялся без модификации server. [Спецификация](integrations/minecraft-voice.md).
 
-Реализованный первый срез и запуск: [development](development.md). Текущий Compose включает core, engine (profile agent), postgres и migrate; login и тестовый Minecraft ещё не добавлены. Старые имена volumes в тексте описывали концептуальную схему, фактические имена указаны в compose.yaml.
+Запуск и текущий статус: [development](development.md). Compose включает core, PostgreSQL, миграции, Pi profile и Codex profile; login через device flow выполнен отдельно. Live Fabric chat ждёт перезапуска test client. Полный Telegram/social MVP не готов.

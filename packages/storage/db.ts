@@ -74,7 +74,7 @@ export async function nextEvent(p: Principal) {
   } catch (error) { await db.query('ROLLBACK'); throw error; }
   finally { db.release(); }
 }
-export async function complete(p: Principal, eventId: string, text: string, epoch: number) {
+export async function complete(p: Principal, eventId: string, text: string, epoch: number, speak = false) {
   const db = await pool.connect();
   try {
     await db.query('BEGIN');
@@ -86,6 +86,14 @@ export async function complete(p: Principal, eventId: string, text: string, epoc
       [eventId, p.characterId, p.audienceId]);
     if (!event.rowCount) throw new DomainError('event_not_found');
     await db.query('INSERT INTO replies(event_id,text) VALUES($1,$2) ON CONFLICT(event_id) DO NOTHING', [eventId, text]);
+    if (speak) {
+      if (text.length > 300) throw new DomainError('speech_too_long');
+      const active = await db.query("SELECT count(*)::int AS n FROM speech_jobs WHERE character_id=$1 AND state IN ('pending','claimed','playing') AND expires_at>now()", [p.characterId]);
+      if (active.rows[0].n >= 3) throw new DomainError('speech_queue_full');
+      await db.query(`INSERT INTO speech_jobs(id,character_id,audience_id,request_id,text,epoch,expires_at)
+        VALUES($1,$2,$3,$4,$5,$6,now()+interval '60 seconds') ON CONFLICT(character_id,audience_id,request_id) DO NOTHING`,
+        [randomUUID(),p.characterId,p.audienceId,`reply:${eventId}`,text,epoch]);
+    }
     await db.query('UPDATE social_events SET processed=true WHERE id=$1', [eventId]);
     await db.query('UPDATE characters SET lease_until=NULL WHERE id=$1', [p.characterId]);
     await db.query('COMMIT');
