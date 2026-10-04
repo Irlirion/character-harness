@@ -1,4 +1,4 @@
-"""Loopback-only, bounded HTTP wrapper around a resident whisper.cpp server."""
+"""Loopback-only, bounded HTTP wrapper around GigaAM v3 CTC transcribing raw PCM16LE."""
 
 from __future__ import annotations
 
@@ -7,12 +7,8 @@ import json
 import numpy as np
 import os
 import signal
-import subprocess
 import sys
 import threading
-import time
-import urllib.error
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -20,7 +16,6 @@ MAX_AUDIO_BYTES = 768_000  # mono PCM16 for eight seconds at CAPTURE_SAMPLE_RATE
 MAX_TRANSCRIPT_CHARS = 1000
 CAPTURE_SAMPLE_RATE = 48000
 PCM_FULL_SCALE = 32768.0
-BACKEND_STARTUP_TIMEOUT_SECONDS = 60
 
 
 class Recognizer:
@@ -57,6 +52,37 @@ class SttService:
         if not isinstance(text, str) or len(text) > MAX_TRANSCRIPT_CHARS:
             raise RuntimeError("stt_recognition_failed")
         return text
+
+
+class GigaamRecognizer(Recognizer):
+    def __init__(self, model_dir: Path, threads: int):
+        self.model_dir = model_dir
+        self.threads = max(1, threads)
+        self.model = None
+
+    def is_loaded(self) -> bool:
+        return self.model is not None
+
+    def load(self):
+        # Imported here so the contract tests run without onnxruntime or the model.
+        import onnx_asr
+        import onnxruntime as rt
+
+        options = rt.SessionOptions()
+        options.intra_op_num_threads = self.threads
+        options.inter_op_num_threads = 1
+        self.model = onnx_asr.load_model(
+            "gigaam-v3-ctc",
+            self.model_dir,
+            quantization="int8",
+            sess_options=options,
+            providers=["CPUExecutionProvider"],
+        )
+
+    def transcribe(self, samples, sample_rate: int) -> str:
+        if self.model is None:
+            raise RuntimeError("gigaam_not_loaded")
+        return self.model.recognize(samples, sample_rate=sample_rate).text
 
 
 class SttServer(ThreadingHTTPServer):
@@ -145,8 +171,7 @@ class SttHandler(BaseHTTPRequestHandler):
             try:
                 text = self.server.service.transcribe(audio)
             except RuntimeError as exc:
-                code = 504 if str(exc) == "stt_backend_unavailable" else 502
-                self.send_json(code, {"error": str(exc)})
+                self.send_json(502, {"error": str(exc)})
                 return
             self.send_json(200, {"text": text})
         except (TimeoutError, ConnectionResetError, BrokenPipeError):
@@ -171,66 +196,31 @@ def read_token(path: Path) -> str:
     return token
 
 
-def wait_for_backend(process: subprocess.Popen, backend_url: str):
-    deadline = time.monotonic() + BACKEND_STARTUP_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError("whisper_server_exited_during_startup")
-        try:
-            with urllib.request.urlopen(f"{backend_url}/health", timeout=1) as response:
-                if response.status == 200 and json.loads(response.read(4096)).get("status") == "ok":
-                    return
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-            time.sleep(0.2)
-    raise RuntimeError("whisper_server_startup_timeout")
-
-
 def main():
     token = read_token(Path(os.environ.get("STT_TOKEN_FILE", "/run/secrets/stt_token")))
-    model = Path(os.environ.get("STT_MODEL", "/models/ggml-small-q5_1.bin"))
-    binary = os.environ.get("WHISPER_SERVER", "/usr/local/bin/whisper-server")
-    host = os.environ.get("WHISPER_SERVER_HOST", "127.0.0.1")
-    port = int(os.environ.get("WHISPER_SERVER_PORT", "3083"))
+    model_dir = Path(os.environ.get("STT_MODEL_DIR", "/models"))
     threads = int(os.environ.get("STT_CPU_THREADS", "4"))
-    if host != "127.0.0.1" or not model.is_absolute() or not model.is_file():
+    if not model_dir.is_absolute() or not (model_dir / "config.json").is_file():
         raise RuntimeError("stt_configuration_invalid")
-    backend_url = f"http://{host}:{port}"
-    command = [binary, "--host", host, "--port", str(port), "-m", str(model), "-l", "ru", "-t", str(threads), "-p", "1", "-ng"]
-    backend = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    server = None
+    recognizer = GigaamRecognizer(model_dir, threads)
+    recognizer.load()
+    recognizer.transcribe(np.zeros(1600, dtype=np.float32), 16000)
+
+    service = SttService(token, recognizer)
+    bind_host = os.environ.get("STT_HOST", "0.0.0.0")
+    bind_port = int(os.environ.get("STT_PORT", "3082"))
+    server = SttServer((bind_host, bind_port), service)
+
+    def request_shutdown(_signal, _frame):
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, request_shutdown)
+    signal.signal(signal.SIGINT, request_shutdown)
+    print(json.dumps({"event": "stt_ready", "model": "gigaam-v3-ctc", "language": "ru"}), flush=True)
     try:
-        wait_for_backend(backend, backend_url)
-        service = SttService(token, backend_url, backend=backend)
-        bind_host = os.environ.get("STT_HOST", "0.0.0.0")
-        bind_port = int(os.environ.get("STT_PORT", "3082"))
-        server = SttServer((bind_host, bind_port), service)
-
-        def stop_server_when_backend_fails():
-            service.restart_requested.wait()
-            if service.restart_requested.is_set():
-                server.shutdown()
-
-        threading.Thread(target=stop_server_when_backend_fails, daemon=True).start()
-
-        def request_shutdown(_signal, _frame):
-            threading.Thread(target=server.shutdown, daemon=True).start()
-
-        signal.signal(signal.SIGTERM, request_shutdown)
-        signal.signal(signal.SIGINT, request_shutdown)
-        print(json.dumps({"event": "stt_ready", "model": "small-q5_1", "language": "ru"}), flush=True)
         server.serve_forever(poll_interval=0.25)
-        if service.restart_requested.is_set():
-            raise RuntimeError("whisper_backend_failed_restart_required")
     finally:
-        if server is not None:
-            server.server_close()
-        if backend.poll() is None:
-            backend.send_signal(signal.SIGTERM)
-            try:
-                backend.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                backend.kill()
-                backend.wait(timeout=2)
+        server.server_close()
 
 
 if __name__ == "__main__":
