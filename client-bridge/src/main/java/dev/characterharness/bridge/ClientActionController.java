@@ -5,12 +5,17 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.block.ShapeContext;
+import net.minecraft.registry.Registries;
+import net.minecraft.util.shape.VoxelShape;
 
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.Objects;
 
 final class ClientActionController {
+    private static final int MAX_DIAGNOSTIC_BLOCKS=12;
+    private static final int MAX_DIAGNOSTIC_SHAPES=64;
     record Action(String id, String claimId, String kind, double forward, double strafe,
                   double yawDegrees, double pitchDegrees, int durationMs, long expiresAtMs, String sessionId) {}
 
@@ -50,8 +55,11 @@ final class ClientActionController {
         if ("walk".equals(action.kind()) && !ActionBounds.validWalk(action.forward(),action.strafe(),action.durationMs())) {
             completion.accept(action, result("failed", "invalid_walk_bounds")); return;
         }
-        if ("walk".equals(action.kind()) && (!client.player.isOnGround() || !safeStep(client,action))) {
-            completion.accept(action,result("failed","unsafe_or_unsupported_step")); return;
+        if ("walk".equals(action.kind())) {
+            StepCheck step=checkStep(client,action);
+            if (!step.safe(client.player.isOnGround())) {
+                completion.accept(action,result("failed","unsafe_or_unsupported_step",step,client.player.isOnGround())); return;
+            }
         }
         if ("turn".equals(action.kind()) && !ActionBounds.validTurn(action.yawDegrees(),action.pitchDegrees())) {
             completion.accept(action, result("failed", "invalid_turn_bounds")); return;
@@ -82,8 +90,11 @@ final class ClientActionController {
             boolean moved = "walk".equals(action.kind()) && new Vec3d(client.player.getX(),client.player.getY(),client.player.getZ()).squaredDistanceTo(startPos) >= 0.0025;
             finish(client, action, moved ? "completed" : "failed", moved ? null : "action_expired_or_no_movement"); return;
         }
-        if ("walk".equals(action.kind()) && (!client.player.isOnGround() || !safeStep(client,action))) {
-            finish(client,action,"cancelled","step_became_unsafe"); return;
+        if ("walk".equals(action.kind())) {
+            StepCheck step=checkStep(client,action);
+            if (!step.safe(client.player.isOnGround())) {
+                finish(client,action,"cancelled","step_became_unsafe",step,client.player.isOnGround()); return;
+            }
         }
         if ("turn".equals(action.kind()) && !turnSet) {
             targetYaw = net.minecraft.util.math.MathHelper.wrapDegrees(startYaw + (float) action.yawDegrees());
@@ -112,9 +123,14 @@ final class ClientActionController {
     }
 
     private void finish(MinecraftClient client, Action action, String state, String reason) {
+        finish(client,action,state,reason,null,false);
+    }
+
+    private void finish(MinecraftClient client, Action action, String state, String reason, StepCheck step, boolean onGround) {
         if ("walk".equals(action.kind())) release(client);
         JsonObject evidence = new JsonObject();
         evidence.addProperty("kind", action.kind());
+        if(step!=null)step.addEvidence(evidence,onGround);
         if (client.player != null) {
             if (startPos != null) {
                 evidence.addProperty("start_x", startPos.x); evidence.addProperty("start_y", startPos.y); evidence.addProperty("start_z", startPos.z);
@@ -147,24 +163,75 @@ final class ClientActionController {
         return !check.collisionAhead()&&check.supportAhead();
     }
 
-    record StepCheck(boolean collisionAhead,boolean supportAhead) {}
+    record StepCheck(boolean collisionAhead,boolean supportAhead,boolean unknownChunk,String obstacleBlockId,Double estimatedStepUp) {
+        String status(boolean onGround) {
+            if(!onGround)return "not_grounded";
+            if(unknownChunk)return "unknown_chunk";
+            if(collisionAhead)return "collision";
+            if(!supportAhead)return "no_support";
+            return "clear";
+        }
+        boolean safe(boolean onGround) { return "clear".equals(status(onGround)); }
+        void addSummary(JsonObject target,boolean onGround) {
+            target.addProperty("step_status",status(onGround));
+            if(obstacleBlockId!=null)target.addProperty("obstacle_block_id",obstacleBlockId);
+            if(estimatedStepUp!=null)target.addProperty("estimated_step_up",estimatedStepUp);
+        }
+        void addEvidence(JsonObject target,boolean onGround) {
+            target.addProperty("on_ground",onGround);
+            target.addProperty("collision_ahead",collisionAhead);
+            target.addProperty("support_ahead",supportAhead);
+            addSummary(target,onGround);
+        }
+    }
     static StepCheck checkStep(MinecraftClient client,Action action) {
         ActionBounds.Direction direction=ActionBounds.horizontal(client.player.getYaw(),action.forward(),action.strafe());
         double dx=direction.dx()*0.35;
         double dz=direction.dz()*0.35;
         Box shifted=client.player.getBoundingBox().offset(dx,0,dz);
-        BlockPos target=BlockPos.ofFloored(shifted.getCenter());
-        BlockPos support=BlockPos.ofFloored(shifted.getCenter().x,shifted.minY-0.12,shifted.getCenter().z);
-        if(!client.world.isChunkLoaded(target)||!client.world.isChunkLoaded(support))return new StepCheck(true,false);
-        boolean collision=client.world.getBlockCollisions(client.player,shifted).iterator().hasNext();
         Box under=new Box(shifted.minX,shifted.minY-0.12,shifted.minZ,shifted.maxX,shifted.minY,shifted.maxZ);
+        int minX=net.minecraft.util.math.MathHelper.floor(shifted.minX+1.0e-7),maxX=net.minecraft.util.math.MathHelper.floor(shifted.maxX-1.0e-7);
+        int minY=net.minecraft.util.math.MathHelper.floor(shifted.minY+1.0e-7),maxY=net.minecraft.util.math.MathHelper.floor(shifted.maxY-1.0e-7);
+        int minZ=net.minecraft.util.math.MathHelper.floor(shifted.minZ+1.0e-7),maxZ=net.minecraft.util.math.MathHelper.floor(shifted.maxZ-1.0e-7);
+        long blockCount=(long)(maxX-minX+1)*(maxY-minY+1)*(maxZ-minZ+1);
+        if(blockCount<=0||blockCount>MAX_DIAGNOSTIC_BLOCKS)return new StepCheck(true,false,true,null,null);
+        for(int x=minX;x<=maxX;x++)for(int y=minY;y<=maxY;y++)for(int z=minZ;z<=maxZ;z++)
+            if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null);
+        int underMinY=net.minecraft.util.math.MathHelper.floor(under.minY+1.0e-7);
+        int underMaxY=net.minecraft.util.math.MathHelper.floor(under.maxY-1.0e-7);
+        for(int x=minX;x<=maxX;x++)for(int y=underMinY;y<=underMaxY;y++)for(int z=minZ;z<=maxZ;z++)
+            if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null);
+        boolean collision=client.world.getBlockCollisions(client.player,shifted).iterator().hasNext();
         boolean supportAhead=client.world.getBlockCollisions(client.player,under).iterator().hasNext();
-        return new StepCheck(collision,supportAhead);
+        String obstacleBlockId=null;Double estimatedStepUp=null;
+        if(collision){
+            double nearest=Double.POSITIVE_INFINITY;var targetCenter=shifted.getCenter();int inspectedShapes=0;
+            scan: for(int x=minX;x<=maxX;x++)for(int y=minY;y<=maxY;y++)for(int z=minZ;z<=maxZ;z++){
+                BlockPos pos=new BlockPos(x,y,z);var state=client.world.getBlockState(pos);
+                VoxelShape shape=state.getCollisionShape(client.world,pos,ShapeContext.of(client.player));
+                for(Box local:shape.getBoundingBoxes()){
+                    if(inspectedShapes++>=MAX_DIAGNOSTIC_SHAPES)break scan;
+                    Box worldBox=local.offset(x,y,z);if(!worldBox.intersects(shifted))continue;
+                    double distance=worldBox.getCenter().squaredDistanceTo(targetCenter);
+                    if(distance>=nearest)continue;
+                    String blockId=Registries.BLOCK.getId(state.getBlock()).toString();
+                    if(blockId.length()>128)continue;
+                    nearest=distance;obstacleBlockId=blockId;
+                    estimatedStepUp=Math.max(0,Math.min(2,worldBox.maxY-client.player.getY()));
+                }
+            }
+        }
+        return new StepCheck(collision,supportAhead,false,obstacleBlockId,estimatedStepUp);
     }
 
     private static Result result(String state, String reason) {
         JsonObject evidence = new JsonObject(); evidence.addProperty("reason", reason);
         return new Result(state, evidence);
+    }
+
+    private static Result result(String state,String reason,StepCheck step,boolean onGround) {
+        JsonObject evidence=new JsonObject();evidence.addProperty("reason",reason);step.addEvidence(evidence,onGround);
+        return new Result(state,evidence);
     }
 
     static String startReadinessFailure(boolean hasPlayer, boolean hasWorld, boolean hasNetworkHandler, boolean screenOpen) {

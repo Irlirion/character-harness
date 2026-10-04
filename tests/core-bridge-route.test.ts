@@ -97,6 +97,15 @@ test('the bridge accepts bounded client-action reasons emitted by the Fabric con
   assert.deepEqual(h.actionReasons,reasons);
 });
 
+test('client-action evidence accepts bounded step diagnostics',async()=>{
+  const r=await harness().post('/bridge/actions/00000000-0000-4000-8000-000000000099',{
+    claim_id:'11111111-1111-4111-8111-111111111111',state:'cancelled',
+    evidence:{reason:'step_became_unsafe',on_ground:true,collision_ahead:true,support_ahead:true,
+      step_status:'collision',obstacle_block_id:'minecraft:oak_leaves',estimated_step_up:1}
+  });
+  assert.equal(r.statusCode,200);
+});
+
 test('client world ingestion and action claiming require an explicit core opt-in',async()=>{
   const disabled=harness();
   const observation={session_id:'11111111-1111-4111-8111-111111111111',connected:false,server:null,observed_at:new Date().toISOString()};

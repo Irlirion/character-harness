@@ -18,7 +18,10 @@ const self = z.object({
   x:coordinate(-30_000_000,30_000_000), y:coordinate(-4096,4096), z:coordinate(-30_000_000,30_000_000),
   yaw:coordinate(-360,360), pitch:coordinate(-90,90), vx:coordinate(-10,10), vy:coordinate(-10,10), vz:coordinate(-10,10),
   on_ground:z.boolean(), health:coordinate(0,1000), dimension:z.string().min(1).max(100),
-  collision_ahead:z.boolean(), support_ahead:z.boolean()
+  collision_ahead:z.boolean(), support_ahead:z.boolean(),
+  step_status:z.enum(['clear','not_grounded','collision','no_support','unknown_chunk']).optional(),
+  obstacle_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),
+  estimated_step_up:coordinate(0,2).optional()
 }).strict();
 const time = z.string().refine(v=>Number.isFinite(Date.parse(v)),'invalid_timestamp');
 const connected = z.object({

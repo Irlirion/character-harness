@@ -141,6 +141,9 @@ app.post('/bridge/actions/:id', async req => {
   const id = z.string().uuid().parse((req.params as {id:string}).id);
   const coordinate=z.number().finite().min(-30_000_000).max(30_000_000);const yCoordinate=z.number().finite().min(-4096).max(4096);
   const evidenceSchema=z.object({kind:z.enum(['walk','turn']).optional(),reason:z.enum(['action_expired_before_start','client_not_ready','movement_input_busy','unsupported_action','invalid_walk_bounds','invalid_turn_bounds','unsafe_or_unsupported_step','step_became_unsafe','client_disconnected','screen_opened','world_session_mismatch','action_lease_stale','action_lease_revoked','action_expired_or_no_movement','no_position_change','rotation_not_observed','client_action_busy','test_server_gate_closed','initial_lease_invalid']).optional(),
+    on_ground:z.boolean().optional(),collision_ahead:z.boolean().optional(),support_ahead:z.boolean().optional(),
+    step_status:z.enum(['clear','not_grounded','collision','no_support','unknown_chunk']).optional(),
+    obstacle_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),estimated_step_up:z.number().finite().min(0).max(2).optional(),
     start_x:coordinate.optional(),start_y:yCoordinate.optional(),start_z:coordinate.optional(),end_x:coordinate.optional(),end_y:yCoordinate.optional(),end_z:coordinate.optional(),
     start_yaw:z.number().finite().min(-360).max(360).optional(),end_yaw:z.number().finite().min(-360).max(360).optional(),
     start_pitch:z.number().finite().min(-90).max(90).optional(),end_pitch:z.number().finite().min(-90).max(90).optional()}).strict();
@@ -217,7 +220,7 @@ function gateway() {
     catch (error) { if (!(error instanceof DomainError)) throw error; return { ...result({error:error.code}), isError:true }; }
   });
   server.registerTool('agent_action_status', {
-    description:'Read the status and local client evidence for one of your previously queued walk/turn operations. Only state=completed proves it succeeded.',
+    description:'Read the status and local client evidence for one of your previously queued walk/turn operations. For blocked walking, explain step_status and obstacle_block_id/estimated_step_up when present; this is a bounded diagnostic estimate, not permission to step over the block, and the crosshair target is not necessarily the obstacle. Only state=completed proves it succeeded.',
     inputSchema:{id:z.string().uuid()}
   }, async ({id}) => {
     try { const current=await clientActionStatus(principal,id);return result(allowClientWorld?current:{...current,allowed:false}); }

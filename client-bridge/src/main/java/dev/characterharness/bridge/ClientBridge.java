@@ -391,7 +391,8 @@ public final class ClientBridge implements ClientModInitializer {
         self.addProperty("dimension",client.world.getRegistryKey().getValue().toString());
         ClientActionController.Action forward=new ClientActionController.Action("snapshot","snapshot","walk",1,0,0,0,300,System.currentTimeMillis()+1000,activeWorldSessionId);
         ClientActionController.StepCheck step=ClientActionController.checkStep(client,forward);
-        self.addProperty("collision_ahead",step.collisionAhead());self.addProperty("support_ahead",step.supportAhead());body.add("self",self);
+        self.addProperty("collision_ahead",step.collisionAhead());self.addProperty("support_ahead",step.supportAhead());
+        step.addSummary(self,client.player.isOnGround());body.add("self",self);
         JsonArray visible=new JsonArray();Map<UUID,JsonObject> recognized=new ConcurrentHashMap<>();Vec3d eye=client.player.getEyePos();float yaw=client.player.getYaw();
         ArrayList<JsonObject> candidates=new ArrayList<>();
         for(PlayerEntity entity:client.world.getPlayers()){
