@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { assertActive, assertReplay, DomainError } from '../domain/policy.ts';
 import type { Principal } from '../domain/policy.ts';
 import { secret } from '../domain/secrets.ts';
+import { loadRecentConversation } from './conversation.ts';
 export const pool = new pg.Pool({ connectionString: secret('DATABASE_URL'), max: 8 });
 export async function status(p: Principal) {
   const { rows } = await pool.query('SELECT id, name, persona, paused, epoch FROM characters WHERE id=$1', [p.characterId]);
@@ -73,6 +74,9 @@ export async function nextEvent(p: Principal) {
     await db.query('COMMIT'); return event ?? null;
   } catch (error) { await db.query('ROLLBACK'); throw error; }
   finally { db.release(); }
+}
+export async function recentConversation(p: Principal, currentEventId: string) {
+  return loadRecentConversation(pool.query.bind(pool), p, currentEventId);
 }
 /** Hand an event back untouched: a quota pause is not a failure, so the budget is restored. */
 export async function deferEvent(p: Principal, eventId: string) {

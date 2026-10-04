@@ -4,6 +4,7 @@ import { CodexRpc } from '../../packages/codex/rpc.ts';
 import { configureCodex } from '../../packages/codex/config.ts';
 import { selectConfiguredModel } from '../../packages/codex/model.ts';
 import { handleAttemptFailure } from '../../packages/codex/backoff.ts';
+import { makeTurnInput } from '../../packages/domain/conversation-context.ts';
 import { secret } from '../../packages/domain/secrets.ts';
 const home=process.env.HARNESS_CODEX_HOME??'/data/codex';
 const cwd=process.env.HARNESS_CODEX_WORKSPACE??'/data/workspace';
@@ -70,7 +71,7 @@ while(!stopped){
    void api('/engine/status').then(s=>{if(s.paused || s.epoch!==input.character.epoch)interrupt();}).catch(interrupt).finally(()=>{checking=false;});
   },1000);
   try{
-   const turn=await rpc.request('turn/start',{threadId,input:[{type:'text',text:JSON.stringify({event:input.event,memories:input.memories})}],effort:'low',summary:'none'});
+   const turn=await rpc.request('turn/start',{threadId,input:[{type:'text',text:JSON.stringify(makeTurnInput(input.event,input.memories,input.recent_conversation??[]))}],effort:'low',summary:'none'});
    turnId=turn.turn.id;
    if(revoked || stopped){void rpc.request('turn/interrupt',{threadId,turnId}).catch(()=>{});throw new Error('turn_revoked');}
    await finished;

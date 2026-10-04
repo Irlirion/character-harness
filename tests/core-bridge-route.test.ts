@@ -14,7 +14,7 @@ function harness(opts:{allowSystemChatPublicDemo?:boolean;audienceId?:string}={}
     tokens:TOKENS,allowSystemChatPublicDemo:opts.allowSystemChatPublicDemo??true,
     deps:{
       pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},
-      status:unused,search:unused,remember:unused,control:unused,nextEvent:unused,complete:unused,deferEvent:unused,
+      status:unused,search:unused,remember:unused,control:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,
       enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,
       ingest:async(_p:unknown,event:{author_provenance:string;author_trust:string})=>{
         ingested.push({provenance:event.author_provenance,trust:event.author_trust});

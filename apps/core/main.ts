@@ -2,7 +2,7 @@ import { buildApp } from './app.ts';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { secret } from '../../packages/domain/secrets.ts';
-import { pool, status, search, remember, control, ingest, nextEvent, complete, deferEvent } from '../../packages/storage/db.ts';
+import { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent } from '../../packages/storage/db.ts';
 import { enqueueSpeech, claimSpeech, speechState, updateSpeech } from '../../packages/storage/speech.ts';
 
 const principal = { characterId: process.env.CHARACTER_ID ?? 'sever', audienceId: process.env.AUDIENCE_ID ?? 'demo-public' };
@@ -25,7 +25,7 @@ await pool.query(`INSERT INTO characters(id,name,persona) VALUES($1,$2,$3)
 const app = buildApp({
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken },
   allowSystemChatPublicDemo,
-  deps: { pool, status, search, remember, control, ingest, nextEvent, complete, deferEvent,
+  deps: { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent,
     enqueueSpeech, claimSpeech, speechState, updateSpeech }
 });
 const shutdown = async () => { await app.close(); await pool.end(); };

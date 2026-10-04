@@ -15,6 +15,7 @@ export type CoreDeps = {
   control: (p: Principal, paused: boolean) => Promise<any>;
   ingest: (p: Principal, event: any) => Promise<{ inserted: boolean; event_id: string | null }>;
   nextEvent: (p: Principal) => Promise<any>;
+  recentConversation: (p: Principal, currentEventId: string) => Promise<any>;
   complete: (p: Principal, eventId: string, text: string, epoch: number, speak?: boolean) => Promise<any>;
   deferEvent: (p: Principal, eventId: string) => Promise<any>;
   enqueueSpeech: (p: Principal, requestId: string, text: string) => Promise<any>;
@@ -33,7 +34,7 @@ export type BuildAppOptions = {
 export function buildApp({ principal, tokens, allowSystemChatPublicDemo, deps }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 const { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken } = tokens;
-const { pool, status, search, remember, control, ingest, nextEvent, complete, deferEvent,
+const { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent,
   enqueueSpeech, claimSpeech, speechState, updateSpeech } = deps;
 app.addHook('onRequest', async (req, reply) => {
   // No browser access is needed in this slice. Reject Origin instead of offering permissive CORS.
@@ -113,8 +114,10 @@ app.get('/engine/input', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store');
   const event = await nextEvent(principal);
   const state = await status(principal);
+  const currentEvent = state.paused ? null : event;
+  const recent_conversation = currentEvent ? await recentConversation(principal, currentEvent.id) : [];
   return { character: state, audience_id: principal.audienceId,
-    event: state.paused ? null : event, memories: await search(principal, '') };
+    event: currentEvent, memories: await search(principal, ''), recent_conversation };
 });
 app.post('/engine/defer', async req => {
   const event_id = z.string().uuid().parse((req.body as { event_id: string }).event_id);
