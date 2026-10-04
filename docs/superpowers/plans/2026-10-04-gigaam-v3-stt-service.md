@@ -88,12 +88,15 @@ Expected: FAIL — `TypeError: SttService.__init__() takes 4 positional argument
 In `apps/stt-service/main.py`, add `import numpy as np` after `import json`. Replace the constants block:
 
 ```python
+MIN_AUDIO_BYTES = 2880  # 30 ms at CAPTURE_SAMPLE_RATE, clear of the GigaAM v3 analysis window
 MAX_AUDIO_BYTES = 768_000  # mono PCM16 at 48 kHz for eight seconds
 MAX_TRANSCRIPT_CHARS = 1000
 MAX_TRANSCRIPT_BYTES = 4000
 CAPTURE_SAMPLE_RATE = 48000
 PCM_FULL_SCALE = 32768.0
 ```
+
+`MIN_AUDIO_BYTES` is a floor rather than a feature. The GigaAM v3 preprocessor applies a 320-sample sliding window at 16 kHz with no padding, so a shorter waveform raises `ValueError` inside numpy; without this floor the blanket `except Exception` would report malformed input as a 502 service fault instead of a 400 client error.
 
 `BACKEND_TIMEOUT_SECONDS` and `BACKEND_STARTUP_TIMEOUT_SECONDS` are removed in Task 2 along with the code that used them.
 
@@ -128,6 +131,8 @@ class SttService:
         samples = np.frombuffer(audio, dtype="<i2").astype(np.float32) / PCM_FULL_SCALE
         if samples.size == 0:
             raise RuntimeError("stt_audio_required")
+        if len(audio) < MIN_AUDIO_BYTES:
+            raise RuntimeError("audio_too_short")
         try:
             text = self.recognizer.transcribe(samples, CAPTURE_SAMPLE_RATE)
         except Exception as error:
@@ -315,12 +320,12 @@ class GigaamRecognizer(Recognizer):
     def __init__(self, model_dir: Path, threads: int):
         self.model_dir = model_dir
         self.threads = max(1, threads)
-        self.model = None
+        self.adapter = None
 
     def is_loaded(self) -> bool:
-        return self.model is not None
+        return self.adapter is not None
 
-    def load(self):
+    def load(self) -> None:
         # Imported here so the contract tests run without onnxruntime or the model.
         import onnx_asr
         import onnxruntime as rt
@@ -328,7 +333,7 @@ class GigaamRecognizer(Recognizer):
         options = rt.SessionOptions()
         options.intra_op_num_threads = self.threads
         options.inter_op_num_threads = 1
-        self.model = onnx_asr.load_model(
+        self.adapter = onnx_asr.load_model(
             "gigaam-v3-ctc",
             self.model_dir,
             quantization="int8",
@@ -337,9 +342,9 @@ class GigaamRecognizer(Recognizer):
         )
 
     def transcribe(self, samples, sample_rate: int) -> str:
-        if self.model is None:
+        if self.adapter is None:
             raise RuntimeError("gigaam_not_loaded")
-        return self.model.recognize(samples, sample_rate=sample_rate)
+        return self.adapter.recognize(samples, sample_rate=sample_rate)
 ```
 
 - [ ] **Step 2: Replace `wait_for_backend` and `main`**
@@ -351,11 +356,16 @@ def main():
     token = read_token(Path(os.environ.get("STT_TOKEN_FILE", "/run/secrets/stt_token")))
     model_dir = Path(os.environ.get("STT_MODEL_DIR", "/models"))
     threads = int(os.environ.get("STT_CPU_THREADS", "4"))
-    if not model_dir.is_absolute() or not (model_dir / "config.json").is_file():
+    if (
+        not model_dir.is_absolute()
+        or not (model_dir / "config.json").is_file()
+        or not (model_dir / "v3_ctc.int8.onnx").is_file()
+        or not (model_dir / "v3_vocab.txt").is_file()
+    ):
         raise RuntimeError("stt_configuration_invalid")
     recognizer = GigaamRecognizer(model_dir, threads)
     recognizer.load()
-    recognizer.transcribe(np.zeros(1600, dtype=np.float32), 16000)
+    recognizer.transcribe(np.zeros(MIN_AUDIO_BYTES // 2, dtype=np.float32), CAPTURE_SAMPLE_RATE)
 
     service = SttService(token, recognizer)
     bind_host = os.environ.get("STT_HOST", "0.0.0.0")
@@ -400,6 +410,14 @@ with:
 ```
 
 There is no longer a 504 path: 504 previously meant "the backend process is gone, restart me", and there is no separate process any more.
+
+The same step also adds a length floor to `do_POST`, immediately after the existing `audio_too_large` block and before the `pcm16_alignment_invalid` check, so that the HTTP layer owns the invariant `SttService.transcribe` already enforces:
+
+```python
+            if length < MIN_AUDIO_BYTES:
+                self.send_json(400, {"error": "audio_too_short"})
+                return
+```
 
 - [ ] **Step 4: Delete the now-dead imports**
 
