@@ -18,6 +18,7 @@ export function boundRecentConversation(rows: RecentConversationTurn[], maxTurns
   return selected.reverse();
 }
 
-export function makeTurnInput<TEvent, TMemory>(event: TEvent, memories: TMemory[], recentConversation: RecentConversationTurn[]) {
-  return { event, memories, recent_conversation: recentConversation };
+export function makeTurnInput<TEvent, TMemory>(event: TEvent, memories: TMemory[], recentConversation: RecentConversationTurn[], worldObservation?: unknown) {
+  const input = { event, memories, recent_conversation: recentConversation };
+  return worldObservation === undefined ? input : { ...input, world_observation: worldObservation };
 }

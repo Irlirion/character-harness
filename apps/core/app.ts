@@ -7,6 +7,7 @@ import { DomainError, matchesToken, requestPath, requiredRole } from '../../pack
 import { BridgeEventScopeError, parseBridgeEvent } from '../../packages/domain/bridge-event.ts';
 import type { ClientActionKind } from '../../packages/storage/actions.ts';
 import { isObservationTimeCurrent, worldObservationSchema } from '../../packages/domain/world-observation.ts';
+import { SYSTEM_CHAT_SERVER } from '../../packages/domain/bridge-event.ts';
 import type { WorldObservation } from '../../packages/domain/world-observation.ts';
 
 export type CoreTokens = { engine: string; owner: string; audio: string; bridge: string };
@@ -49,6 +50,17 @@ const { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridg
 const { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent,
   enqueueSpeech, claimSpeech, speechState, updateSpeech, enqueueClientAction, clientActionStatus, clientActionLease, claimClientAction, finishClientAction,
   saveWorldObservation,latestWorldObservation,cancelClientActions } = deps;
+async function currentWorldObservation() {
+  if (!allowClientWorld) return { available:false, stale:true, connected:false, disabled:true };
+  const current=await latestWorldObservation(principal);
+  if (!current.available) return { available:false, stale:true, connected:false };
+  if (!current.stale && current.connected && current.server===SYSTEM_CHAT_SERVER && current.snapshot) {
+    return { available:true, stale:false, connected:true, session_id:current.session_id, server:current.server,
+      age_ms:current.age_ms, snapshot:current.snapshot };
+  }
+  return { available:true, stale:current.stale, connected:false, server:current.server??null,
+    age_ms:current.age_ms };
+}
 app.addHook('onRequest', async (req, reply) => {
   // No browser access is needed in this slice. Reject Origin instead of offering permissive CORS.
   if (req.headers.origin) return reply.code(403).send({ error: 'browser_access_disabled' });
@@ -156,10 +168,11 @@ app.get('/engine/input', async (_req, reply) => {
   const state = await status(principal);
   const currentEvent = state.paused ? null : event;
   const recent_conversation = currentEvent ? await recentConversation(principal, currentEvent.id) : [];
+  const world_observation = currentEvent ? await currentWorldObservation() : undefined;
   return { character: state, audience_id: principal.audienceId,
-    event: currentEvent, memories: await search(principal, ''), recent_conversation };
+    event: currentEvent, memories: await search(principal, ''), recent_conversation, world_observation };
 });
-app.get('/engine/observation',async()=>latestWorldObservation(principal));
+app.get('/engine/observation',async()=>currentWorldObservation());
 app.post('/engine/defer', async req => {
   const event_id = z.string().uuid().parse((req.body as { event_id: string }).event_id);
   return deferEvent(principal, event_id);
@@ -173,7 +186,7 @@ function gateway() {
   const server = new McpServer({ name: 'character-harness', version: '0.1.0' });
   const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }] });
   server.registerTool('agent_get_status', { description: 'Read current character status', inputSchema: {} }, async () => result(await status(principal)));
-  server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map.',inputSchema:{}},async()=>result(allowClientWorld?await latestWorldObservation(principal):{available:false,stale:true,connected:false,disabled:true}));
+  server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map.',inputSchema:{}},async()=>result(await currentWorldObservation()));
   server.registerTool('memory_search', { description: 'Search only the current character and audience memory', inputSchema: { query: z.string().max(200).default('') } }, async ({ query }) => result(await search(principal, query)));
   server.registerTool('memory_propose', {
     description: 'Save a personal, unverified note for this audience; do not save secrets or treat guesses as facts',

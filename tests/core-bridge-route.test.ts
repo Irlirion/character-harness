@@ -27,7 +27,8 @@ function harness(opts:{allowSystemChatPublicDemo?:boolean;allowClientWorld?:bool
     }});
   const post=(path:string,body:unknown,token=TOKENS.bridge)=>app.inject({method:'POST',url:path,
     headers:{authorization:`Bearer ${token}`},payload:body as object});
-  return {app,ingested,post,actionReasons};
+  const get=(path:string,token=TOKENS.engine)=>app.inject({method:'GET',url:path,headers:{authorization:`Bearer ${token}`}});
+  return {app,ingested,post,actionReasons,get};
 }
 
 test('a system chat event is ingested for the public demo',async()=>{
@@ -101,6 +102,9 @@ test('client world ingestion and action claiming require an explicit core opt-in
   const observation={session_id:'11111111-1111-4111-8111-111111111111',connected:false,server:null,observed_at:new Date().toISOString()};
   assert.equal((await disabled.post('/bridge/observation',observation)).json().error,'client_world_disabled');
   assert.deepEqual((await disabled.post('/bridge/actions/claim',{})).json(),{action:null});
+  const disabledObservation=await disabled.get('/engine/observation');
+  assert.equal(disabledObservation.json().disabled,true);
+  assert.equal('snapshot' in disabledObservation.json(),false);
   const enabled=harness({allowClientWorld:true});
   assert.deepEqual((await enabled.post('/bridge/observation',observation)).json(),{saved:true});
   assert.deepEqual((await enabled.post('/bridge/actions/claim',{})).json(),{action:null});
