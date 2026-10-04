@@ -238,5 +238,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"stt_start_failed: {type(exc).__name__}", file=sys.stderr, flush=True)
+        print(f"stt_start_failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         raise SystemExit(1)
