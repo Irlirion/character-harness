@@ -99,7 +99,7 @@ In `apps/stt-service/main.py`, add `import numpy as np` after `import json`. Rep
 
 ```python
 MIN_AUDIO_BYTES = 2880  # 30 ms at CAPTURE_SAMPLE_RATE, clear of the GigaAM v3 analysis window
-MAX_AUDIO_BYTES = 768_000  # mono PCM16 at 48 kHz for eight seconds
+MAX_AUDIO_BYTES = 768_000  # mono PCM16 for eight seconds at CAPTURE_SAMPLE_RATE
 MAX_TRANSCRIPT_CHARS = 1000
 CAPTURE_SAMPLE_RATE = 48000
 PCM_FULL_SCALE = 32768.0
@@ -320,7 +320,7 @@ class FakeService:
 
 `is_loaded` is deleted: `FakeService` stands in for `SttService`, and only a real `SttService` now delegates readiness to its recognizer.
 
-`SttServiceTest` needs no other change: the handler only touches `service.token`, `service.is_ready()`, `service.inference_slot` and `service.transcribe(audio)`.
+`SttServiceTest` needs no other change at this point: the handler only touches `service.token`, `service.is_ready()`, `service.inference_slot` and `service.transcribe(audio)`, and `FakeService.transcribe` bypasses `SttService.transcribe` entirely, so `MIN_AUDIO_BYTES` does not constrain its 200-byte payloads yet. Task 2 Step 3 adds the matching floor to the handler and raises them to `VALID_PCM`.
 
 - [ ] **Step 8: Run the whole Python suite**
 
@@ -452,14 +452,28 @@ The same step also adds a length floor to `do_POST`, immediately after the exist
                 return
 ```
 
+This floor invalidates three `SttServiceTest` payloads, which are 200 bytes each, so raise them in the same step:
+
+- `test_valid_pcm_returns_only_transcript_json`: `self.post(b"\x00\x00" * 100)` becomes `self.post(VALID_PCM)`.
+- `test_busy_request_is_rejected_without_queueing_or_body_read`: the same `self.post(b"\x00\x00" * 100)` becomes `self.post(VALID_PCM)`, otherwise the request is refused before `transcribe` runs and `entered.wait(2)` times out.
+- `test_audio_length_format_and_pcm_alignment_are_bounded`: `self.post(b"123")` becomes `self.post(b"\x00" * (MIN_AUDIO_BYTES + 1))`, staying odd so it still tests misalignment rather than the floor, and `self.post(b"12", content_type="audio/wav")` becomes `self.post(VALID_PCM, content_type="audio/wav")`, staying above the floor while still being the wrong content type.
+
+That last test also gains the handler-side case for the new floor, asserted with a deliberately short body:
+
+```python
+        status, body = self.post(b"\x00\x00" * 100)
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["error"], "audio_too_short")
+```
+
 - [ ] **Step 4: Delete the now-dead imports**
 
-In `apps/stt-service/main.py`, delete these import lines: `import socket`, `import subprocess`, `import tempfile`, `import time`, `import urllib.error`, `import urllib.request`, `import wave`. Keep `import hmac`, `import json`, `import os`, `import signal`, `import sys`, `import threading`.
+In `apps/stt-service/main.py`, delete these import lines: `import subprocess`, `import time`, `import urllib.error`, `import urllib.request`. Those four are all that remain at this point: `import socket`, `import tempfile` and `import wave` were already removed in Task 1 along with the ffmpeg and multipart code. Keep `import hmac`, `import json`, `import os`, `import signal`, `import sys`, `import threading`.
 
 The module docstring becomes:
 
 ```python
-"""Loopback-only, bounded HTTP wrapper around GigaAM v3 CTC transcribing raw PCM16LE."""
+"""Loopback-only, bounded HTTP wrapper around in-process GigaAM v3 CTC transcription."""
 ```
 
 - [ ] **Step 5: Run the Python suite**
@@ -468,7 +482,7 @@ Run:
 ```sh
 cd apps/stt-service && python3 -m unittest test_main -v
 ```
-Expected: all PASS. No test constructs a real `GigaamRecognizer`, so the lazy imports never execute.
+Expected: 14 tests, all PASS. This expectation only holds because Step 3 also raised the three `SttServiceTest` payloads to `VALID_PCM`; skip that and the suite is red with 400s where 200s are asserted. No test constructs a real `GigaamRecognizer`, so the lazy imports never execute.
 
 - [ ] **Step 6: Verify the lazy import and the absence of dead code**
 
@@ -487,7 +501,7 @@ Expected: no matches.
 - [ ] **Step 7: Commit**
 
 ```sh
-git add apps/stt-service/main.py
+git add apps/stt-service/main.py apps/stt-service/test_main.py
 git commit -m "feat(stt): transcribe with GigaAM v3 CTC int8 in process"
 ```
 
