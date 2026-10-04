@@ -48,7 +48,14 @@ This task touches only the service class. `main()` and its subprocess plumbing a
 
 - [ ] **Step 1: Write the failing conversion test**
 
-In `apps/stt-service/test_main.py`, add `import struct` to the imports and add `import numpy as np`. Delete the whole `TranscriptionPipelineTest` class and replace it with:
+In `apps/stt-service/test_main.py`, add `import struct` to the imports and add `import numpy as np`. Import `MIN_AUDIO_BYTES` alongside `MAX_AUDIO_BYTES` from `main`, and add the module-level constant next to `TOKEN`:
+
+```python
+TOKEN = "t" * 40
+VALID_PCM = b"\x00\x00" * (MIN_AUDIO_BYTES // 2)
+```
+
+`VALID_PCM` is the smallest payload the service will accept, so every test that needs a request to reach recognition uses it. Delete the whole `TranscriptionPipelineTest` class and replace it with:
 
 ```python
 class RecognizerConversionTest(unittest.TestCase):
@@ -64,8 +71,9 @@ class RecognizerConversionTest(unittest.TestCase):
                 captured["sample_rate"] = sample_rate
                 return "север здесь"
 
+        probe = struct.pack("<hhh", -32768, 0, 32767)
         service = SttService(TOKEN, CapturingRecognizer())
-        text = service.transcribe(struct.pack("<hhh", -32768, 0, 32767))
+        text = service.transcribe(probe + b"\x00" * (MIN_AUDIO_BYTES - len(probe)))
 
         self.assertEqual(text, "север здесь")
         self.assertEqual(captured["sample_rate"], 48000)
@@ -74,6 +82,8 @@ class RecognizerConversionTest(unittest.TestCase):
         self.assertAlmostEqual(float(captured["samples"][1]), 0.0, places=6)
         self.assertAlmostEqual(float(captured["samples"][2]), 32767 / 32768, places=6)
 ```
+
+The three probe samples stay at indices 0, 1 and 2; the trailing zero padding only clears `MIN_AUDIO_BYTES`, which six bytes of PCM would not.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -91,12 +101,13 @@ In `apps/stt-service/main.py`, add `import numpy as np` after `import json`. Rep
 MIN_AUDIO_BYTES = 2880  # 30 ms at CAPTURE_SAMPLE_RATE, clear of the GigaAM v3 analysis window
 MAX_AUDIO_BYTES = 768_000  # mono PCM16 at 48 kHz for eight seconds
 MAX_TRANSCRIPT_CHARS = 1000
-MAX_TRANSCRIPT_BYTES = 4000
 CAPTURE_SAMPLE_RATE = 48000
 PCM_FULL_SCALE = 32768.0
 ```
 
 `MIN_AUDIO_BYTES` is a floor rather than a feature. The GigaAM v3 preprocessor applies a 320-sample sliding window at 16 kHz with no padding, so a shorter waveform raises `ValueError` inside numpy; without this floor the blanket `except Exception` would report malformed input as a 502 service fault instead of a 400 client error.
+
+There is deliberately no `MAX_TRANSCRIPT_BYTES` guard. At most 1000 code points times 4 UTF-8 bytes is exactly 4000, so a strict `> 4000` byte check can never fire and the bound is already enforced by the character limit.
 
 `BACKEND_TIMEOUT_SECONDS` and `BACKEND_STARTUP_TIMEOUT_SECONDS` are removed in Task 2 along with the code that used them.
 
@@ -128,20 +139,18 @@ class SttService:
         return self.recognizer.is_loaded()
 
     def transcribe(self, audio: bytes) -> str:
-        samples = np.frombuffer(audio, dtype="<i2").astype(np.float32) / PCM_FULL_SCALE
-        if samples.size == 0:
-            raise RuntimeError("stt_audio_required")
+        if len(audio) == 0:
+            raise RuntimeError("audio_required")
+        if len(audio) % 2:
+            raise RuntimeError("pcm16_alignment_invalid")
         if len(audio) < MIN_AUDIO_BYTES:
             raise RuntimeError("audio_too_short")
+        samples = np.frombuffer(audio, dtype="<i2").astype(np.float32) / PCM_FULL_SCALE
         try:
             text = self.recognizer.transcribe(samples, CAPTURE_SAMPLE_RATE)
         except Exception as error:
             raise RuntimeError("stt_recognition_failed") from error
-        if (
-            not isinstance(text, str)
-            or len(text) > MAX_TRANSCRIPT_CHARS
-            or len(text.encode("utf-8")) > MAX_TRANSCRIPT_BYTES
-        ):
+        if not isinstance(text, str) or len(text) > MAX_TRANSCRIPT_CHARS:
             raise RuntimeError("stt_recognition_failed")
         return text
 ```
@@ -159,6 +168,14 @@ Expected: PASS.
 Add to `apps/stt-service/test_main.py`:
 
 ```python
+class _RecordingRecognizer:
+    def is_loaded(self):
+        return True
+
+    def transcribe(self, samples, sample_rate):
+        return "север"
+
+
 class RecognitionFailureTest(unittest.TestCase):
     def serve(self, recognizer):
         server = SttServer(("127.0.0.1", 0), SttService(TOKEN, recognizer))
@@ -175,7 +192,7 @@ class RecognitionFailureTest(unittest.TestCase):
         conn.request(
             "POST",
             "/transcribe",
-            body=b"\x00\x00" * 100,
+            body=VALID_PCM,
             headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/octet-stream"},
         )
         response = conn.getresponse()
@@ -213,15 +230,25 @@ class RecognitionFailureTest(unittest.TestCase):
 
         self.assertEqual(self.transcribe(self.serve(LoudRecognizer())), (502, {"error": "stt_recognition_failed"}))
 
-    def test_oversized_transcript_in_bytes_is_rejected(self):
+    def test_char_limit_is_the_only_transcript_bound(self):
         class WideRecognizer:
             def is_loaded(self):
                 return True
 
             def transcribe(self, _samples, _sample_rate):
-                return "ы" * 1000  # two bytes each, so 2000 bytes but only 1000 chars
+                return "\U0001f600" * 1000
 
-        self.assertEqual(self.transcribe(self.serve(WideRecognizer())), (502, {"error": "stt_recognition_failed"}))
+        self.assertEqual(self.transcribe(self.serve(WideRecognizer())), (200, {"text": "\U0001f600" * 1000}))
+
+    def test_non_string_transcript_is_rejected(self):
+        class BrokenRecognizer:
+            def is_loaded(self):
+                return True
+
+            def transcribe(self, _samples, _sample_rate):
+                return None
+
+        self.assertEqual(self.transcribe(self.serve(BrokenRecognizer())), (502, {"error": "stt_recognition_failed"}))
 
     def test_unloaded_recognizer_is_never_ready(self):
         class DarkRecognizer:
@@ -233,7 +260,7 @@ class RecognitionFailureTest(unittest.TestCase):
 
         self.assertEqual(self.readiness(self.serve(DarkRecognizer())), (503, {"ready": False}))
 
-    def test_empty_audio_is_refused_before_recognition(self):
+    def test_empty_and_misaligned_audio_are_refused_before_recognition(self):
         reached = threading.Event()
 
         class WatchfulRecognizer:
@@ -245,9 +272,16 @@ class RecognitionFailureTest(unittest.TestCase):
                 return "север"
 
         service = SttService(TOKEN, WatchfulRecognizer())
-        with self.assertRaisesRegex(RuntimeError, "stt_audio_required"):
+        with self.assertRaisesRegex(RuntimeError, "^audio_required$"):
             service.transcribe(b"")
+        with self.assertRaisesRegex(RuntimeError, "^pcm16_alignment_invalid$"):
+            service.transcribe(b"\x01")
         self.assertFalse(reached.is_set())
+
+    def test_too_short_audio_is_a_client_error(self):
+        service = SttService(TOKEN, _RecordingRecognizer())
+        with self.assertRaisesRegex(RuntimeError, "^audio_too_short$"):
+            service.transcribe(b"\x00\x00" * 100)
 
     def test_empty_transcript_is_passed_through(self):
         class SilentRecognizer:
@@ -278,14 +312,13 @@ class FakeService:
 
     def __init__(self, transcribe=None):
         self.inference_slot = threading.Lock()
-        self.transcribe = transcribe or (lambda _samples, _sample_rate: "Север здесь.")
-
-    def is_loaded(self):
-        return True
+        self.transcribe = transcribe or (lambda _audio: "Север здесь.")
 
     def is_ready(self):
         return True
 ```
+
+`is_loaded` is deleted: `FakeService` stands in for `SttService`, and only a real `SttService` now delegates readiness to its recognizer.
 
 `SttServiceTest` needs no other change: the handler only touches `service.token`, `service.is_ready()`, `service.inference_slot` and `service.transcribe(audio)`.
 
