@@ -1,7 +1,9 @@
 FROM python:3.12-slim-bookworm AS service-tests
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-RUN pip install --no-cache-dir numpy==2.5.3
+COPY apps/stt-service/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir "$(grep -m1 '^numpy==' /tmp/requirements.txt)" \
+    && rm /tmp/requirements.txt
 COPY apps/stt-service/main.py /app/main.py
 COPY apps/stt-service/test_main.py /app/test_main.py
 RUN python /app/test_main.py
@@ -14,9 +16,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
-COPY apps/stt-service/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
-    && rm /tmp/requirements.txt \
+COPY apps/stt-service/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt \
     && pip freeze \
     && groupadd --system --gid 10002 stt \
     && useradd --system --uid 10002 --gid 10002 --home-dir /nonexistent --shell /usr/sbin/nologin stt

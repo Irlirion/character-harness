@@ -533,7 +533,9 @@ Replace the whole file with:
 FROM python:3.12-slim-bookworm AS service-tests
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-RUN pip install --no-cache-dir numpy==2.5.3
+COPY apps/stt-service/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir "$(grep -m1 '^numpy==' /tmp/requirements.txt)" \
+    && rm /tmp/requirements.txt
 COPY apps/stt-service/main.py /app/main.py
 COPY apps/stt-service/test_main.py /app/test_main.py
 RUN python /app/test_main.py
@@ -546,9 +548,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
-COPY apps/stt-service/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
-    && rm /tmp/requirements.txt \
+COPY apps/stt-service/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt \
     && pip freeze \
     && groupadd --system --gid 10002 stt \
     && useradd --system --uid 10002 --gid 10002 --home-dir /nonexistent --shell /usr/sbin/nologin stt
@@ -569,13 +570,17 @@ The `whisper-build` stage is gone, along with `ca-certificates`, `cmake`, `build
 
 `pip freeze` records the three transitive distributions that the pins do not cover (`flatbuffers`, `packaging`, `protobuf`, the last with no ceiling from ONNX Runtime) in the build log.
 
+`requirements.txt` is the single source of the numpy pin. The `service-tests` stage reads it with `grep -m1 '^numpy=='` instead of repeating the version, because two independently written pins drift silently: with the two disagreeing, `docker build` still exits 0 while the contract tests validate against a numpy that never runs in production. The accepted cost is that the test stage's cache key now tracks the whole file, so an `onnxruntime` bump re-runs the 6-second test stage. One source of truth beats a cache hit.
+
+The runtime stage copies `requirements.txt` to `/app/requirements.txt` and does **not** delete it. `rm` in a later layer cannot remove an earlier layer's bytes — it only records a whiteout — so the file survives in the image regardless, and the `rm` bought nothing but an extra layer. Shipping it visibly is better: the running container's declared inputs can be diffed against `pip freeze` output without re-deriving them.
+
 - [ ] **Step 3: Verify the contract tests pass inside the image build**
 
 Run:
 ```sh
-docker build --target service-tests -f Dockerfile.stt -t character-harness-stt-tests .
+docker build --no-cache --target service-tests -f Dockerfile.stt -t character-harness-stt-tests .
 ```
-Expected: the build succeeds and the log ends with `OK` from `unittest`. This stage installs only numpy, which proves the lazy `onnx_asr` import keeps the contract tests dependency-free.
+Expected: the build succeeds and the log ends with `OK` from `unittest`. This stage installs only numpy, which proves the lazy `onnx_asr` import keeps the contract tests dependency-free. `--no-cache` is required: on a cached rebuild BuildKit reports each step as `CACHED` and replays no stdout, so the `OK` this step asserts is absent on every re-run and the check would fail on a correct tree.
 
 - [ ] **Step 4: Build the runtime image**
 
@@ -590,14 +595,19 @@ Expected: the build succeeds and the image is listed.
 
 Run:
 ```sh
+set -o pipefail
 docker build --no-cache -f Dockerfile.stt -t character-harness-stt:latest . 2>&1 | tee /tmp/stt-build.log
-grep -c "Ran 14 tests" /tmp/stt-build.log
+grep -c ' OK$' /tmp/stt-build.log
 ```
-Expected: `1` or more. **If it prints `0`, stop and fix `Dockerfile.stt` before committing.** It means the `runtime` stage has no dependency edge on `service-tests`, so BuildKit pruned the test stage as a non-ancestor and the build shipped untested code behind a green result. The one-line cause is a `COPY apps/stt-service/main.py /app/main.py` in the `runtime` stage in place of `COPY --from=service-tests /app/main.py /app/main.py`.
+Expected: `1` or more. **If it prints `0`, stop and fix `Dockerfile.stt` before committing.**
 
-This step exists because Steps 3 and 4 structurally cannot detect that failure. Both pass an explicit `--target`, so each builds only the stage it names and neither pulls `service-tests` into its graph; each would report success with the test stage pruned. The default build is the one `docker compose build stt` actually performs, so it is the only one of the three that reproduces the real build.
+`set -o pipefail` is load-bearing. Without it the pipeline's exit status is `tee`'s, which is always `0`, so a build that printed `ERROR: failed to solve` would still report success while the grep found its `OK` from an earlier step. `service-tests` and `runtime` build in parallel, so the `runtime` `pip install` can fail *after* the tests have already printed `OK`; only `pipefail` makes the build's own status survive the pipe.
 
-`--no-cache` is required, not a speed concession. On a fully cached build BuildKit reports each step as `CACHED` and does not replay its stdout, so `grep -c "Ran 14 tests"` returns `0` even when the graph is correct. Without `--no-cache` this assertion fails for the wrong reason and gets deleted instead of fixed.
+The marker is `' OK$'`, not `^OK$` and not the test count. BuildKit prefixes each stdout line with a step id such as `#13 `, so an anchored `^OK$` matches nothing; the trailing space anchors it to the end of the line instead. A count-based marker like `Ran 14 tests` would also fail the moment anyone adds a 15th test, sending a maintainer to edit `Dockerfile.stt` in response to a test-count change. A `0` has exactly three causes: the `runtime` stage has no dependency edge on `service-tests`, so BuildKit pruned the test stage as a non-ancestor; or the build was fully cached and replayed no stdout; or the test run did not complete. The first is the one-line fix, `COPY apps/stt-service/main.py /app/main.py` in the `runtime` stage in place of `COPY --from=service-tests /app/main.py /app/main.py`. The second is why `--no-cache` is in the command: on a fully cached build BuildKit reports each step as `CACHED` and does not replay stdout, so without it this assertion fails on a correct tree and gets deleted instead of fixed.
+
+Step 4 cannot detect the pruning regression, but not for the reason it first appears. Building `--target runtime` builds `runtime` **and all its ancestors**, so with the current `COPY --from=service-tests` edge it does run the contract tests and does print `OK`. Its blind spot is conditional, not structural: with the regression present the edge is gone, `service-tests` stops being an ancestor, and `--target runtime` then prunes it and reports success with the tests never executed. Step 3 has a different and simpler blind spot — naming `--target service-tests` never builds `runtime` at all, so it cannot observe the pruning. The default build is what `docker compose build stt` actually performs, and it exercises both stages in one pass, which is why it is the gate.
+
+The repo's root `Dockerfile:1` puts `pnpm typecheck && pnpm test` in a shared base so its `runtime` stage inherits the tests as ancestors. `Dockerfile.stt` deliberately does not follow that pattern: its test stage must install only numpy, or it would stop proving that the contract tests need no ML dependency and therefore that `GigaamRecognizer.load()`'s lazy import is intact.
 
 - [ ] **Step 6: Commit**
 
