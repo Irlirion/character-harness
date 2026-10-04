@@ -25,7 +25,7 @@ class FakeService:
         return True
 
 
-class _RecordingRecognizer:
+class _StubRecognizer:
     def is_loaded(self):
         return True
 
@@ -256,7 +256,7 @@ class RecognitionFailureTest(unittest.TestCase):
         self.assertFalse(reached.is_set())
 
     def test_too_short_audio_is_a_client_error(self):
-        service = SttService(TOKEN, _RecordingRecognizer())
+        service = SttService(TOKEN, _StubRecognizer())
         with self.assertRaisesRegex(RuntimeError, "^audio_too_short$"):
             service.transcribe(b"\x00\x00" * 100)
 
