@@ -24,7 +24,7 @@ try {
   assert.ok(input.event);
   assert.equal((await api('/engine/input',engine)).event,null,'Active lease prevents a second claim');
   await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{requestInit:{headers:{Authorization:`Bearer ${engine}`}}}));
-  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['agent_get_status','memory_propose','memory_search']);
+  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),['agent_action_status','agent_get_status','agent_observe','agent_turn','agent_walk','memory_propose','memory_search']);
   const args={text:`public-${source_key}`,invocation_id:randomUUID(),epoch:input.character.epoch};
   const first=await client.callTool({name:'memory_propose',arguments:args});
   const second=await client.callTool({name:'memory_propose',arguments:args});

@@ -26,6 +26,14 @@ character_name=Север
 token_file=/absolute/path/to/character-harness/secrets/bridge_token
 system_chat_enabled=false
 system_chat_server=mc.agicraft.ru:25565
+actions_enabled=false
+observation_enabled=false
+action_server=mc.agicraft.ru:25565
+stt_enabled=false
+voice_server=mc.agicraft.ru:25565
+ffmpeg_path=/opt/homebrew/bin/ffmpeg
+whisper_cli_path=/absolute/path/to/whisper.cpp/build/bin/whisper-cli
+whisper_model_path=/absolute/path/to/whisper.cpp/models/ggml-base.bin
 ```
 
 `core_url` must be plain HTTP on exactly `127.0.0.1` or `localhost` with an explicit port from 1 to 65535. Credentials, any path other than `/`, query strings and fragments are rejected before the bridge token is read.
@@ -40,4 +48,14 @@ On the signed chat path the bridge sends the UUID provided with the server chat 
 
 Replies are displayed locally and acknowledged to core after display. If the client closes between display and acknowledgement, a reply may be shown again after reconnect. Voice is emitted by the existing SVC client/audio path; this mod does not manipulate the microphone or alter SVC settings.
 
-Current verification covers compilation against the declared Fabric versions, the synthetic core → Codex → speech queue cycle, and a live addressed player message observed reaching core as an unverified `minecraft_system_chat` event. A live player message has not yet completed the whole cycle through to a spoken reply: the ChatGPT plan limit was exhausted at the time.
+## Read-only awareness, movement, and incoming voice
+
+These features are disabled by default and are pinned to `mc.agicraft.ru:25565`. Core also requires the separate `BRIDGE_CLIENT_WORLD_ENABLED=true` opt-in before it accepts observations or exposes movement to the client; this setting defaults to false. Set `observation_enabled=true` before enabling either `actions_enabled` or `stt_enabled`; the config loader rejects action/STT without observation. Core action authorization also requires a fresh observation and the active character epoch. Keep the matching core audience limited to the opted-in public demo.
+
+The client publishes one compact local snapshot per second: its own position, yaw/pitch, velocity, health, dimension and a one-step collision/support check; at most eight loaded players within 16 blocks that pass a block raycast; and the current crosshair target. Player UUIDs and names are local server-provided observations, not externally verified identity. No chunk scan or world map is sent. Snapshots expire after 2.5 seconds, and a reconnect changes the client session ID.
+
+`agent_walk` can hold normal movement keys for 100–1200 ms in one of four discrete directions, after checking a short step and support locally. `agent_turn` changes yaw by at most 90 degrees and pitch by at most 30. Core fences jobs by character, audience, invocation, epoch, observation session, lease and deadline. The client rechecks the lease, session, screen and collision each tick and releases movement keys on completion, cancellation, disconnect or shutdown. Completion reports local position/rotation evidence; it does not claim server acknowledgement or pathfinding.
+
+Incoming Simple Voice Chat transcription uses the client API's remote entity audio event, sender UUID, and 48 kHz mono PCM16 frames. The bridge segments bounded snippets after silence, ignores own-player and whisper frames, runs local `ffmpeg` and `whisper-cli` with a Russian multilingual model, and discards the PCM and temporary files after transcription. It accepts only transcripts beginning with the character wake name `Север`; it does not continuously forward ambient conversation. Set `stt_enabled=true` only for the test server after provisioning the local executable/model paths. The resulting author is namespaced as an unverified SVC sender; a matching visible player record is attached as observation metadata without cross-channel identity linking.
+
+The new observation, movement, and STT paths have offline schema/DB-smoke and Fabric unit/build checks. They have not been exercised in a live game, and no live movement, model inference, or microphone speech was sent during implementation. Restart only the separate test instance to load an updated jar; the primary Minecraft instance is not part of this setup.

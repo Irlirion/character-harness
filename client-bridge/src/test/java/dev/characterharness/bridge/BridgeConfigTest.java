@@ -37,6 +37,15 @@ class BridgeConfigTest {
         assertThrows(IOException.class, () -> BridgeConfig.normalizeSystemChatServer("attacker.example:25565"));
     }
 
+    @Test
+    void actionsAndVoiceRequireWorldObservationOptIn() throws Exception {
+        BridgeConfig.validateFeatureGates(false, false, false);
+        BridgeConfig.validateFeatureGates(true, true, false);
+        BridgeConfig.validateFeatureGates(false, true, true);
+        assertThrows(IOException.class, () -> BridgeConfig.validateFeatureGates(true, false, false));
+        assertThrows(IOException.class, () -> BridgeConfig.validateFeatureGates(false, false, true));
+    }
+
     private static void assertRejected(String value) {
         assertThrows(IOException.class, () -> BridgeConfig.normalizeCoreUrl(value), value);
     }

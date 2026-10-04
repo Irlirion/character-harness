@@ -7,15 +7,19 @@ const SYSTEM_EVENT={source_key:'minecraft-system:mc.agicraft.ru:25565:irlirion:1
 const SIGNED_EVENT={source_key:'minecraft:11111111-1111-4111-8111-111111111111:2:bb',author_id:'11111111-1111-4111-8111-111111111111',author_provenance:'fabric_profile_context',text:'привет'};
 
 const unused=async()=>{throw new Error('unused dependency called');};
-function harness(opts:{allowSystemChatPublicDemo?:boolean;audienceId?:string}={}){
+function harness(opts:{allowSystemChatPublicDemo?:boolean;allowClientWorld?:boolean;audienceId?:string}={}){
   const ingested:{provenance:string;trust:string}[]=[];
+  const actionReasons:string[]=[];
   const app=buildApp({
     principal:{characterId:'sever',audienceId:opts.audienceId??'demo-public'},
-    tokens:TOKENS,allowSystemChatPublicDemo:opts.allowSystemChatPublicDemo??true,
+    tokens:TOKENS,allowSystemChatPublicDemo:opts.allowSystemChatPublicDemo??true,allowClientWorld:opts.allowClientWorld??false,
     deps:{
       pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},
       status:unused,search:unused,remember:unused,control:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,
       enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,
+      enqueueClientAction:unused,clientActionStatus:unused,clientActionLease:unused,claimClientAction:async()=>null,
+      finishClientAction:async(_p:unknown,_id:string,_claim:string,_state:string,evidence:unknown)=>{const reason=(evidence as {reason?:string}|undefined)?.reason;if(reason)actionReasons.push(reason);return {state:'cancelled'};},
+      saveWorldObservation:async()=>({saved:true}),latestWorldObservation:async()=>({available:false,stale:true,connected:false}),cancelClientActions:async()=>({cancelled:true}),
       ingest:async(_p:unknown,event:{author_provenance:string;author_trust:string})=>{
         ingested.push({provenance:event.author_provenance,trust:event.author_trust});
         return {inserted:true,event_id:'11111111-2222-3333-4444-555555555555'};
@@ -23,7 +27,7 @@ function harness(opts:{allowSystemChatPublicDemo?:boolean;audienceId?:string}={}
     }});
   const post=(path:string,body:unknown,token=TOKENS.bridge)=>app.inject({method:'POST',url:path,
     headers:{authorization:`Bearer ${token}`},payload:body as object});
-  return {app,ingested,post};
+  return {app,ingested,post,actionReasons};
 }
 
 test('a system chat event is ingested for the public demo',async()=>{
@@ -79,4 +83,25 @@ test('a browser origin is refused before any token is considered',async()=>{
     headers:{authorization:`Bearer ${TOKENS.bridge}`,origin:'https://example.com'},payload:SYSTEM_EVENT as object});
   assert.equal(r.statusCode,403);
   assert.equal(r.json().error,'browser_access_disabled');
+});
+
+test('the bridge accepts bounded client-action reasons emitted by the Fabric controller',async()=>{
+  const h=harness();
+  const reasons=['client_action_busy','action_expired_before_start','step_became_unsafe','rotation_not_observed'];
+  for(const [index,reason] of reasons.entries()){
+    const r=await h.post(`/bridge/actions/00000000-0000-4000-8000-${String(index+1).padStart(12,'0')}`,
+      {claim_id:'11111111-1111-4111-8111-111111111111',state:'cancelled',evidence:{reason}});
+    assert.equal(r.statusCode,200,reason);
+  }
+  assert.deepEqual(h.actionReasons,reasons);
+});
+
+test('client world ingestion and action claiming require an explicit core opt-in',async()=>{
+  const disabled=harness();
+  const observation={session_id:'11111111-1111-4111-8111-111111111111',connected:false,server:null,observed_at:new Date().toISOString()};
+  assert.equal((await disabled.post('/bridge/observation',observation)).json().error,'client_world_disabled');
+  assert.deepEqual((await disabled.post('/bridge/actions/claim',{})).json(),{action:null});
+  const enabled=harness({allowClientWorld:true});
+  assert.deepEqual((await enabled.post('/bridge/observation',observation)).json(),{saved:true});
+  assert.deepEqual((await enabled.post('/bridge/actions/claim',{})).json(),{action:null});
 });

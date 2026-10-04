@@ -9,14 +9,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
-record BridgeConfig(String coreUrl, String token, String characterName, boolean systemChatEnabled, String systemChatServer) {
+record BridgeConfig(String coreUrl, String token, String characterName, boolean systemChatEnabled, String systemChatServer,
+                    boolean actionsEnabled, boolean observationEnabled, String actionServer, boolean sttEnabled, String voiceServer,
+                    String ffmpegPath, String whisperCliPath, String whisperModelPath) {
     static final String SYSTEM_CHAT_SERVER = "mc.agicraft.ru:25565";
 
     static BridgeConfig load() throws IOException {
         Path path = FabricLoader.getInstance().getConfigDir().resolve("character-harness-bridge.properties");
         if (Files.notExists(path)) {
             Files.createDirectories(path.getParent());
-            Files.writeString(path, "core_url=http://127.0.0.1:3000\ncharacter_name=Север\ntoken_file=\nsystem_chat_enabled=false\nsystem_chat_server=mc.agicraft.ru:25565\n");
+            Files.writeString(path, "core_url=http://127.0.0.1:3000\ncharacter_name=Север\ntoken_file=\nsystem_chat_enabled=false\nsystem_chat_server=mc.agicraft.ru:25565\nactions_enabled=false\nobservation_enabled=false\naction_server=mc.agicraft.ru:25565\nstt_enabled=false\nvoice_server=mc.agicraft.ru:25565\nffmpeg_path=/opt/homebrew/bin/ffmpeg\nwhisper_cli_path=\nwhisper_model_path=\n");
         }
         Properties properties = new Properties();
         try (var reader = Files.newBufferedReader(path)) { properties.load(reader); }
@@ -32,7 +34,31 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
         if (!enabledValue.equalsIgnoreCase("true") && !enabledValue.equalsIgnoreCase("false")) throw new IOException("system_chat_enabled must be true or false");
         boolean systemChatEnabled = Boolean.parseBoolean(enabledValue);
         String systemChatServer = normalizeSystemChatServer(properties.getProperty("system_chat_server", SYSTEM_CHAT_SERVER).trim());
-        return new BridgeConfig(coreUrl, token, characterName, systemChatEnabled, systemChatServer);
+        boolean actionsEnabled = strictBoolean(properties.getProperty("actions_enabled", "false"), "actions_enabled");
+        boolean observationEnabled = strictBoolean(properties.getProperty("observation_enabled", "false"), "observation_enabled");
+        boolean sttEnabled = strictBoolean(properties.getProperty("stt_enabled", "false"), "stt_enabled");
+        validateFeatureGates(actionsEnabled, observationEnabled, sttEnabled);
+        String actionServer = normalizeSystemChatServer(properties.getProperty("action_server", SYSTEM_CHAT_SERVER).trim());
+        String voiceServer = normalizeSystemChatServer(properties.getProperty("voice_server", SYSTEM_CHAT_SERVER).trim());
+        String ffmpeg = properties.getProperty("ffmpeg_path", "/opt/homebrew/bin/ffmpeg").trim();
+        String whisper = properties.getProperty("whisper_cli_path", "").trim();
+        String model = properties.getProperty("whisper_model_path", "").trim();
+        if (sttEnabled && (ffmpeg.isEmpty() || whisper.isEmpty() || model.isEmpty()
+                || !Files.isExecutable(Path.of(ffmpeg)) || !Files.isExecutable(Path.of(whisper)) || !Files.isRegularFile(Path.of(model)))) {
+            throw new IOException("STT enabled but local ffmpeg, whisper-cli, or multilingual model path is invalid");
+        }
+        return new BridgeConfig(coreUrl, token, characterName, systemChatEnabled, systemChatServer, actionsEnabled, observationEnabled, actionServer, sttEnabled, voiceServer, ffmpeg, whisper, model);
+    }
+
+    private static boolean strictBoolean(String value, String property) throws IOException {
+        if (!value.equalsIgnoreCase("true") && !value.equalsIgnoreCase("false")) throw new IOException(property + " must be true or false");
+        return Boolean.parseBoolean(value);
+    }
+
+    static void validateFeatureGates(boolean actionsEnabled, boolean observationEnabled, boolean sttEnabled) throws IOException {
+        if ((actionsEnabled || sttEnabled) && !observationEnabled) {
+            throw new IOException("observation_enabled must be true when actions_enabled or stt_enabled is true");
+        }
     }
 
     static String normalizeCoreUrl(String value) throws IOException {

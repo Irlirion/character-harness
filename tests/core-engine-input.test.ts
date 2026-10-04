@@ -16,7 +16,9 @@ test('/engine/input loads prior conversation for the current scoped event and om
       pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},
       status:async()=>({paused:false,epoch:7}),search:async()=>[],remember:unused,control:unused,ingest:unused,
       nextEvent:async()=>next,recentConversation:async(p,eventId)=>{requested.push({...p,eventId});return history;},
-      complete:unused,deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused
+      complete:unused,deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,
+      enqueueClientAction:unused,clientActionStatus:unused,clientActionLease:unused,claimClientAction:unused,finishClientAction:unused,
+      saveWorldObservation:unused,latestWorldObservation:unused,cancelClientActions:unused
     }
   });
   try{

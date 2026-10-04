@@ -6,7 +6,8 @@
   "description": "Forwards addressed chat events to a local Character Harness core.",
   "environment": "client",
   "entrypoints": {
-    "client": ["dev.characterharness.bridge.ClientBridge"]
+    "client": ["dev.characterharness.bridge.ClientBridge"],
+    "voicechat": ["dev.characterharness.bridge.VoiceChatPlugin"]
   },
   "depends": {
     "fabricloader": ">=0.19.5",
