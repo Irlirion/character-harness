@@ -152,12 +152,12 @@ app.post('/bridge/actions/:id', async req => {
 });
 app.get('/bridge/replies', async () => (await pool.query(`SELECT e.id,e.author_id,r.text
   FROM social_events e JOIN replies r ON r.event_id=e.id
-  WHERE e.character_id=$1 AND e.audience_id=$2 AND (e.source_key LIKE 'minecraft:%' OR e.source_key LIKE 'minecraft-system:%') AND NOT e.reply_delivered
+  WHERE e.character_id=$1 AND e.audience_id=$2 AND (e.source_key LIKE 'minecraft:%' OR e.source_key LIKE 'minecraft-system:%' OR e.source_key LIKE 'minecraft-voice:%') AND NOT e.reply_delivered
   ORDER BY e.created_at,e.id LIMIT 20`,[principal.characterId,principal.audienceId])).rows);
 app.post('/bridge/replies/:id/ack', async req => {
   const id=z.string().uuid().parse((req.params as {id:string}).id);
   const result=await pool.query(`UPDATE social_events SET reply_delivered=true
-    WHERE id=$1 AND character_id=$2 AND audience_id=$3 AND (source_key LIKE 'minecraft:%' OR source_key LIKE 'minecraft-system:%') AND processed
+    WHERE id=$1 AND character_id=$2 AND audience_id=$3 AND (source_key LIKE 'minecraft:%' OR source_key LIKE 'minecraft-system:%' OR source_key LIKE 'minecraft-voice:%') AND processed
     AND EXISTS(SELECT 1 FROM replies WHERE event_id=$1)`,[id,principal.characterId,principal.audienceId]);
   if(!result.rowCount)throw new DomainError('reply_not_found');
   return {acknowledged:true};

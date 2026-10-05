@@ -5,6 +5,7 @@ import { buildApp } from '../apps/core/app.ts';
 const TOKENS={engine:'e'.repeat(64),owner:'o'.repeat(64),audio:'a'.repeat(64),bridge:'b'.repeat(64)};
 const SYSTEM_EVENT={source_key:'minecraft-system:mc.agicraft.ru:25565:irlirion:1:aa',author_id:'minecraft-system:mc.agicraft.ru:25565:irlirion',author_provenance:'minecraft_system_chat',source_server:'mc.agicraft.ru:25565',text:'привет'};
 const SIGNED_EVENT={source_key:'minecraft:11111111-1111-4111-8111-111111111111:2:bb',author_id:'11111111-1111-4111-8111-111111111111',author_provenance:'fabric_profile_context',text:'привет'};
+const VOICE_EVENT={source_key:'minecraft-voice:mc.agicraft.ru:25565:83ea010c-183e-3b51-ab65-a221710f623a:1:aa',author_id:'minecraft-voice:mc.agicraft.ru:25565:83ea010c-183e-3b51-ab65-a221710f623a',author_provenance:'minecraft_voice_stt',source_server:'mc.agicraft.ru:25565',text:'привет'};
 
 const unused=async()=>{throw new Error('unused dependency called');};
 function harness(opts:{allowSystemChatPublicDemo?:boolean;allowClientWorld?:boolean;audienceId?:string}={}){
@@ -117,4 +118,24 @@ test('client world ingestion and action claiming require an explicit core opt-in
   const enabled=harness({allowClientWorld:true});
   assert.deepEqual((await enabled.post('/bridge/observation',observation)).json(),{saved:true});
   assert.deepEqual((await enabled.post('/bridge/actions/claim',{})).json(),{action:null});
+});
+
+test('reply delivery and acknowledgement cover the addressed voice namespace',async()=>{
+  const queries:string[]=[];
+  const app=buildApp({
+    principal:{characterId:'sever',audienceId:'demo-public'},
+    tokens:TOKENS,allowSystemChatPublicDemo:true,allowClientWorld:true,
+    deps:{pool:{query:async(sql:string)=>{queries.push(sql);return {rows:[],rowCount:0};},end:async()=>{}},
+      status:unused,search:unused,remember:unused,control:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,
+      enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,
+      enqueueClientAction:unused,clientActionStatus:unused,clientActionLease:unused,claimClientAction:async()=>null,
+      finishClientAction:async()=>({state:'cancelled'}),
+      saveWorldObservation:async()=>({saved:true}),latestWorldObservation:async()=>({available:false,stale:true,connected:false}),cancelClientActions:async()=>({cancelled:true}),
+      ingest:async()=>({inserted:true,event_id:'11111111-2222-3333-4444-555555555555'})}});
+  await app.inject({method:'POST',url:'/bridge/events',headers:{authorization:`Bearer ${TOKENS.bridge}`},payload:VOICE_EVENT});
+  await app.inject({method:'GET',url:'/bridge/replies',headers:{authorization:`Bearer ${TOKENS.bridge}`}});
+  await app.inject({method:'POST',url:'/bridge/replies/11111111-2222-4333-8444-555555555555/ack',headers:{authorization:`Bearer ${TOKENS.bridge}`},payload:{}});
+  const replyQueries=queries.filter(sql=>sql.includes('reply_delivered')||sql.includes('replies'));
+  assert.equal(replyQueries.length,2);
+  for(const sql of replyQueries)assert.match(sql,/source_key LIKE 'minecraft-voice:%'/,sql);
 });
