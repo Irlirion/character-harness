@@ -168,8 +168,10 @@ guard-а на пустой массив после конверсии не ос�
 
 **`Dockerfile.stt`.** Стадия `whisper-build` удаляется целиком — вместе с ней исчезают
 git clone, cmake и сборка из исходников, то есть самая долгая часть билда. В рантайм
-вместо `ffmpeg` приходит `onnxruntime`; `libgomp1` и `libstdc++6` остаются, они нужны
-ONNX Runtime. Непривилегированный пользователь 10002, read-only rootfs, `cap_drop: [ALL]`
+вместо `ffmpeg` приходит `onnxruntime`; из нативных библиотек остаётся только `libstdc++6`,
+потому что `DT_NEEDED` у ONNX Runtime — это `libc, libdl, libgcc_s, libm, libpthread,
+librt, libstdc++`, а `libgomp1` не упоминается ни в aarch64-, ни в x86_64-колесе.
+Непривилегированный пользователь 10002, read-only rootfs, `cap_drop: [ALL]`
 и tmpfs сохраняются. `PYTHONDONTWRITEBYTECODE=1` сохраняется.
 
 **Пины версий.** `apps/stt-service/requirements.txt` с точными пинами. Соответствие

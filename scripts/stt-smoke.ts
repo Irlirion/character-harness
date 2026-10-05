@@ -99,12 +99,13 @@ const unauthorized = await call('/transcribe', {
   body: Buffer.alloc(200),
 });
 const unauthorizedBody = await unauthorized.text();
-// main.py checks the bearer before the readiness and concurrency gates, so a missing token can only
-// come back 401 or 503 not_ready; 429 busy is unreachable here and must not be suggested.
+// main.py runs authorized() before the readiness and concurrency gates, so a missing bearer can only
+// come back 401. Measured against a not-ready service: no header gives 401, wrong bearer 401, correct
+// bearer 503. 503 not_ready and 429 busy are unreachable on this path and must not be suggested.
 assert.equal(
   unauthorized.status,
   401,
-  `missing bearer must be rejected with 401, got HTTP ${unauthorized.status}: ${unauthorizedBody}; without a bearer the service can also answer 503 not_ready if the model unloaded after the /ready probe`,
+  `missing bearer must be rejected with 401, got HTTP ${unauthorized.status}: ${unauthorizedBody}`,
 );
 assert.deepEqual(parseJson(unauthorizedBody), { error: 'unauthorized' });
 
