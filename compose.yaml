@@ -141,8 +141,9 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    # Raised from 2g so the first real measurement is not an OOM kill; see plan Task 8.
-    mem_limit: 3g
+    # Measured peak is 576 MiB under the worst case the service accepts (an 8 s request under
+    # concurrent load); see docs/reviews/stt-model-selection.md.
+    mem_limit: 2g
     cpus: 4.0
     healthcheck:
       test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:3082/ready", timeout=1).read()']
