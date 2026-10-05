@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { secret } from '../../packages/domain/secrets.ts';
+import { spokenText } from '../../packages/domain/speech-text.ts';
 
 if (process.platform !== 'darwin') throw new Error('Audio worker requires macOS');
 
@@ -120,13 +121,13 @@ async function readBoundedBody(response: Response, maxBytes: number) {
   return Buffer.concat(chunks.map(chunk => Buffer.from(chunk)), total);
 }
 
-async function synthesizePiper(file: string, job: Job) {
+async function synthesizePiper(file: string, job: Job, spoken: string) {
   if (!ttsToken) throw new Error('tts_token_missing');
   const controller = new AbortController();
   const request = fetch(new URL('/synthesize', ttsUrl), {
     method: 'POST',
     headers: { Authorization: `Bearer ${ttsToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: job.text }),
+    body: JSON.stringify({ text: spoken }),
     signal: controller.signal,
   }).then(async response => {
     if (!response.ok) {
@@ -184,16 +185,22 @@ while (!stopped) {
 
     dir = await mkdtemp('work/audio/speech-');
     const file = resolve(dir, 'speech.wav');
+    const spoken = spokenText(job.text);
+    if (!spoken) {
+      console.log(JSON.stringify({ event: 'speech_nothing_to_say', speech_id: job.id }));
+      await api(`/audio/jobs/${job.id}`, { claim_id: job.claim_id, state: 'completed' });
+      continue;
+    }
     if (provider === 'piper') {
       const piperFile = resolve(dir, 'speech-22050.wav');
-      await synthesizePiper(piperFile, job);
+      await synthesizePiper(piperFile, job, spoken);
       await processAudio('ffmpeg', [
         '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', piperFile,
         '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le', file,
       ], job);
     } else {
       await processAudio('/usr/bin/say', [
-        '-v', voice, '-o', file, '--file-format=WAVE', '--data-format=LEI16@48000', job.text,
+        '-v', voice, '-o', file, '--file-format=WAVE', '--data-format=LEI16@48000', spoken,
       ], job);
     }
     if (stopped) throw new Error('speech_cancelled');
