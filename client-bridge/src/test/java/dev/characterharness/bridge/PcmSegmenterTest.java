@@ -59,4 +59,32 @@ class PcmSegmenterTest {
         assertNotNull(segment);
         assertEquals(4800 + 4800,segment.samples().length);
     }
+
+    // Measured against this segmenter, not assumed: the minimum producible segment is 1 sample
+    // (2 bytes), because push() starts recording on the first frame whose RMS clears SPEECH_RMS and
+    // finish() emits whatever was recorded when the empty end-of-transmission frame arrives. The
+    // service floor is 2880 bytes, so the segmenter can produce something the service refuses.
+    @Test void producesASingleSampleSegmentFarBelowTheServiceFloor() {
+        PcmSegmenter s=new PcmSegmenter(); UUID speaker=UUID.randomUUID();
+        assertNull(s.accept(speaker,new short[0]));
+        assertNull(s.accept(speaker,frame(1,(short)500)));
+        PcmSegmenter.Segment segment=s.accept(speaker,new short[0]);
+        assertNotNull(segment);
+        assertEquals(1,segment.samples().length);
+        assertTrue(segment.samples().length * Short.BYTES < SttServiceClient.MIN_REQUEST_BYTES);
+    }
+
+    // The reachable shape, not a synthetic one: finish() clears the pre-roll on every end, so a
+    // speaker's second utterance starts with an empty one. A Fabric voice packet is 20 ms, and
+    // 960 samples is 1920 bytes, already under the 2880-byte floor.
+    @Test void secondUtteranceAfterAFinishLosesItsPreRollAndCanFallUnderTheServiceFloor() {
+        PcmSegmenter s=new PcmSegmenter(); UUID speaker=UUID.randomUUID();
+        assertNull(s.accept(speaker,frame(9600,(short)1000)));
+        assertNotNull(s.accept(speaker,new short[0]));
+        assertNull(s.accept(speaker,frame(960,(short)1000)));
+        PcmSegmenter.Segment segment=s.accept(speaker,new short[0]);
+        assertNotNull(segment);
+        assertEquals(960,segment.samples().length);
+        assertTrue(segment.samples().length * Short.BYTES < SttServiceClient.MIN_REQUEST_BYTES);
+    }
 }

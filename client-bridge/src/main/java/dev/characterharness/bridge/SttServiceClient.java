@@ -20,6 +20,11 @@ import java.util.concurrent.Flow;
 
 final class SttServiceClient {
     static final int MAX_REQUEST_BYTES = PcmSegmenter.MAX_SAMPLES * Short.BYTES;
+    // Mirrors the service's MIN_AUDIO_BYTES: 1440 samples at 48 kHz, clear of the GigaAM v3 analysis
+    // window. PcmSegmenter produces segments shorter than this whenever a speaker's utterance starts
+    // with the empty pre-roll left by the previous finish, so the floor is checked here to fail
+    // locally with a clear error instead of costing a round trip to be rejected with 400.
+    static final int MIN_REQUEST_BYTES = 2_880;
     static final int MAX_RESPONSE_BYTES = 4096;
     private final HttpClient http;
     private final URI endpoint;
@@ -35,6 +40,13 @@ final class SttServiceClient {
     String transcribe(short[] samples) throws IOException, InterruptedException {
         if (samples == null || samples.length == 0 || samples.length > PcmSegmenter.MAX_SAMPLES) {
             throw new IOException("audio_bounds");
+        }
+        // A distinct token, not audio_bounds: this is the service's own vocabulary, so a local
+        // rejection and the 400 it would have become name the same condition. audio_bounds stays the
+        // caller-contract violation (null, empty, past the segmenter cap), which shares nothing with a
+        // short-but-well-formed segment.
+        if (samples.length * Short.BYTES < MIN_REQUEST_BYTES) {
+            throw new IOException("audio_too_short");
         }
         byte[] pcm = toLittleEndian(samples);
         try {
