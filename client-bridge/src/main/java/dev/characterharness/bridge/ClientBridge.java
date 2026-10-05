@@ -172,7 +172,7 @@ public final class ClientBridge implements ClientModInitializer {
                 forwardEvent(sourceKey, author, "minecraft_voice_stt", server, text,metadata);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-            } catch (Exception error) { LOG.warn("Voice transcription failed: {}", error.getClass().getSimpleName()); }
+            } catch (Exception error) { LOG.warn("Voice transcription failed: {}", error.getMessage()); }
             finally { clear(); }
         }
     }
