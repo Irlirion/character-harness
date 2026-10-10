@@ -100,7 +100,7 @@ services:
     profiles: [tts]
     environment:
       TTS_TOKEN_FILE: /run/secrets/tts_token
-      PIPER_MODEL: /models/ru_RU-dmitri-medium.onnx
+      PIPER_MODEL: ${PIPER_MODEL:-/models/ru_RU-irina-medium.onnx}
       TTS_HOST: 0.0.0.0
       TTS_PORT: 3081
     secrets: [tts_token]

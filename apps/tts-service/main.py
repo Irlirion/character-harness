@@ -24,7 +24,7 @@ def load_configuration():
     if len(token.encode("utf-8")) < 32:
         raise RuntimeError("tts_token_too_short")
 
-    model_path = Path(os.environ.get("PIPER_MODEL", "/models/ru_RU-dmitri-medium.onnx"))
+    model_path = Path(os.environ.get("PIPER_MODEL", "/models/ru_RU-irina-medium.onnx"))
     if not model_path.is_absolute() or not model_path.is_file():
         raise RuntimeError("piper_model_missing")
 

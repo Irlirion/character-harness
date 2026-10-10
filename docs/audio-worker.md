@@ -4,7 +4,7 @@
 
 ## Запуск
 
-На Mac нужны Node 24 и Swift toolchain. Docker содержит core/БД и отдельный локальный TTS service; игровой клиент и audio worker работают нативно. Для существующей установки нужен новый локальный `secrets/audio_token` (32 случайных байта в hex), отличный от owner/engine. Setup новых secrets создаёт его автоматически; уже существующие secrets не перезаписываются. TTS provider у audio worker — Piper; macOS `say` используется только при явном `TTS_PROVIDER=say`. Если TTS service или его token недоступны, worker не подменяет выбранный голос молча.
+На Mac нужны Node 24, Swift toolchain и FFmpeg. Worker автоматически находит FFmpeg в стандартных каталогах Homebrew; другой путь задаётся через `FFMPEG_PATH=/absolute/path/to/ffmpeg`. Docker содержит core/БД и отдельный локальный TTS service; игровой клиент и audio worker работают нативно. Для существующей установки нужен новый локальный `secrets/audio_token` (32 случайных байта в hex), отличный от owner/engine. Setup новых secrets создаёт его автоматически; уже существующие secrets не перезаписываются. TTS provider у audio worker — Piper; macOS `say` используется только при явном `TTS_PROVIDER=say`. Если TTS service или его token недоступны, worker не подменяет выбранный голос молча.
 
 ```sh
 mkdir -p work/voice-spike
@@ -13,21 +13,21 @@ docker compose up --build -d core
 AUDIO_TOKEN_FILE=secrets/audio_token node --experimental-strip-types apps/audio-worker/main.ts
 ```
 
-### TTS service / Piper Dmitri
+### TTS service / Piper Irina
 
 Синтез работает отдельным HTTP service в Docker; audio worker сохраняет контроль над очередью, pause fence и локальным воспроизведением. Service привязан к host `127.0.0.1:3081` и находится в отдельной Compose bridge-сети, изолированной от core и базы данных. Он принимает только bearer-authenticated JSON с текстом до 300 символов, допускает один активный синтез и отвечает `429` без очереди на занятый запрос. Сервис загружает голос при старте и отдаёт WAV mono PCM16 22.05 kHz; native worker переводит его в 48 kHz PCM16 перед Swift player.
 
-Создать отдельный TTS token (скрипт откажется перезаписать существующий файл), затем скачать зафиксированный Dmitri voice в ignored local directory:
+Создать отдельный TTS token (скрипт откажется перезаписать существующий файл), затем скачать женский русский голос Irina в ignored local directory:
 
 ```sh
 node --experimental-strip-types scripts/setup-tts-secret.ts
 mkdir -p work/tts-models
-curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx' -o work/tts-models/ru_RU-dmitri-medium.onnx
-curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx.json' -o work/tts-models/ru_RU-dmitri-medium.onnx.json
+curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/ru/ru_RU/irina/medium/ru_RU-irina-medium.onnx' -o work/tts-models/ru_RU-irina-medium.onnx
+curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/ru/ru_RU/irina/medium/ru_RU-irina-medium.onnx.json' -o work/tts-models/ru_RU-irina-medium.onnx.json
 PIPER_MODEL_DIR="$PWD/work/tts-models" docker compose --profile tts up --build -d --wait tts
 ```
 
-Чтобы использовать исходную копию модели в macOS user cache, укажи в ignored `.env` `PIPER_MODEL_DIR=/absolute/path/to/voices/dmitri` вместо копирования в `work/tts-models`. Файлы модели не входят в Docker build context; compose монтирует только выбранную директорию read-only.
+Чтобы использовать исходную копию модели в macOS user cache, укажи в ignored `.env` `PIPER_MODEL_DIR=/absolute/path/to/voices/irina` вместо копирования в `work/tts-models`. Файлы модели не входят в Docker build context; compose монтирует только выбранную директорию read-only.
 
 Запустить native audio worker с отдельным TTS bearer:
 
@@ -41,7 +41,7 @@ node --experimental-strip-types apps/audio-worker/main.ts
 
 Каждый запрос к TTS ограничен пятью секундами на стороне audio worker; отмена, pause или истечение срока прерывают HTTP-запрос и не дают WAV попасть в player. Закрытие клиента не останавливает уже начатый вычислительный вызов Piper внутри TTS container, но вход ограничен 300 символами, ответ — 30 секундами и 2 MB. Пока этот вызов заканчивается, новая заявка получает `429` и не накапливается в очереди. TTS container запускается без root, с read-only root filesystem, без Linux capabilities и с памятью до 768 MB.
 
-Перед распространением приложения с Piper runtime учитывайте GPL-3.0-or-later код engine и отдельно проверьте лицензию checkpoint: в карточке Dmitri указана CC0 лицензия датасета, но нет отдельного условия для весов. Выбранный голос и альтернативы сравнивались в [отчёте по выбору TTS](reviews/tts-voice-selection.md).
+Голос по умолчанию — Irina, синтез на CPU. Другую модель можно явно выбрать через `PIPER_MODEL=/models/<voice>.onnx`; рядом нужен одноимённый `.onnx.json`. Перед распространением приложения учитывайте GPL-3.0-or-later код Piper и отдельно проверьте лицензию выбранного checkpoint. Историческое сравнение предыдущего голоса Dmitri и альтернатив: [отчёт по выбору TTS](reviews/tts-voice-selection.md).
 
 В отдельном терминале:
 

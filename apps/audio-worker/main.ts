@@ -2,6 +2,7 @@ import { coreBaseUrl, coreFetch } from '../../packages/domain/core-http.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import { secret } from '../../packages/domain/secrets.ts';
 import { spokenText } from '../../packages/domain/speech-text.ts';
 
@@ -14,6 +15,7 @@ if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error
 const token = secret('AUDIO_TOKEN');
 const device = process.env.AUDIO_DEVICE ?? 'Character Harness Voice';
 const player = resolve(process.env.AUDIO_PLAYER ?? 'work/voice-spike/harness-audio-play');
+const ffmpeg = process.env.FFMPEG_PATH ?? ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(existsSync) ?? 'ffmpeg';
 const provider = process.env.TTS_PROVIDER ?? 'piper';
 if (provider !== 'say' && provider !== 'piper') throw new Error('TTS_PROVIDER must be piper or say');
 const voice = process.env.MACOS_TTS_VOICE ?? 'Milena';
@@ -195,7 +197,7 @@ while (!stopped) {
     if (provider === 'piper') {
       const piperFile = resolve(dir, 'speech-22050.wav');
       await synthesizePiper(piperFile, job, spoken);
-      await processAudio('ffmpeg', [
+      await processAudio(ffmpeg, [
         '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', piperFile,
         '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le', file,
       ], job);
