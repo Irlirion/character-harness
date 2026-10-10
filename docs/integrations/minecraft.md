@@ -43,4 +43,4 @@ minecraft.say(message)
 
 ## Голос
 
-Голосовой вывод через Simple Voice Chat включён в социальный MVP. Предлагается отдельный серверный bridge; см. [голосовую интеграцию](minecraft-voice.md). Для этого пути нужен наш серверный addon/plugin, хотя базовое управление Mineflayer обходится без него.
+Голосовой вывод через Simple Voice Chat включён в социальный MVP. Текущая реализация использует client-only Fabric bridge и native macOS audio worker; собственный серверный addon/plugin не требуется. Исходящая речь через Qwen → Loopback → SVC подтверждена пользователем. Подробности: [голосовая интеграция](minecraft-voice.md) и [audio worker](../audio-worker.md). Описанный выше Mineflayer-путь остаётся проектным вариантом и не описывает текущий игровой клиент.

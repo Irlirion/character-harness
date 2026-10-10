@@ -16,12 +16,13 @@ const token = secret('AUDIO_TOKEN');
 const device = process.env.AUDIO_DEVICE ?? 'Character Harness Voice';
 const player = resolve(process.env.AUDIO_PLAYER ?? 'work/voice-spike/harness-audio-play');
 const ffmpeg = process.env.FFMPEG_PATH ?? ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(existsSync) ?? 'ffmpeg';
-const provider = process.env.TTS_PROVIDER ?? 'piper';
-if (provider !== 'say' && provider !== 'piper') throw new Error('TTS_PROVIDER must be piper or say');
+const provider = process.env.TTS_PROVIDER ?? 'qwen';
+if (!['say', 'qwen'].includes(provider)) throw new Error('TTS_PROVIDER must be qwen or say');
+const httpTts = provider !== 'say';
 const voice = process.env.MACOS_TTS_VOICE ?? 'Milena';
 const ttsUrl = process.env.TTS_URL ?? 'http://127.0.0.1:3081';
 let ttsToken: string | undefined;
-if (provider === 'piper') {
+if (httpTts) {
   const tts = new URL(ttsUrl);
   if (tts.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(tts.hostname)
     || tts.username || tts.password || tts.pathname !== '/' || tts.search || tts.hash) {
@@ -124,7 +125,7 @@ async function readBoundedBody(response: Response, maxBytes: number) {
   return Buffer.concat(chunks.map(chunk => Buffer.from(chunk)), total);
 }
 
-async function synthesizePiper(file: string, job: Job, spoken: string) {
+async function synthesizeTts(file: string, job: Job, spoken: string) {
   if (!ttsToken) throw new Error('tts_token_missing');
   const controller = new AbortController();
   const request = coreFetch(new URL('/synthesize', ttsUrl), {
@@ -147,7 +148,7 @@ async function synthesizePiper(file: string, job: Job, spoken: string) {
     }
     await writeFile(file, wav, { flag: 'wx' });
   });
-  await withJobFence(job, request, () => controller.abort(), 5000);
+  await withJobFence(job, request, () => controller.abort(), 30000);
 }
 
 async function processAudio(command: string, args: string[], job: Job) {
@@ -168,7 +169,7 @@ async function processAudio(command: string, args: string[], job: Job) {
 }
 
 await mkdir('work/audio', { recursive: true });
-if (provider === 'piper') {
+if (httpTts) {
   const ready = await fetch(new URL('/ready', ttsUrl), { signal: AbortSignal.timeout(3000) });
   if (!ready.ok) throw new Error('tts_service_not_ready');
   await ready.body?.cancel();
@@ -194,11 +195,11 @@ while (!stopped) {
       await api(`/audio/jobs/${job.id}`, { claim_id: job.claim_id, state: 'completed' });
       continue;
     }
-    if (provider === 'piper') {
-      const piperFile = resolve(dir, 'speech-22050.wav');
-      await synthesizePiper(piperFile, job, spoken);
+    if (httpTts) {
+      const sourceFile = resolve(dir, 'speech-source.wav');
+      await synthesizeTts(sourceFile, job, spoken);
       await processAudio(ffmpeg, [
-        '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', piperFile,
+        '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', sourceFile,
         '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le', file,
       ], job);
     } else {

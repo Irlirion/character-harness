@@ -1,4 +1,4 @@
-"""Contract tests run in the TTS image build stage with a fake Piper model."""
+"""HTTP contract tests with an injected fixture voice."""
 
 import http.client
 import json
@@ -19,7 +19,7 @@ class TtsServiceTest(unittest.TestCase):
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory(prefix="tts-service-test-")
         cls.root = Path(cls.temp.name)
-        module = cls.root / "modules" / "piper"
+        module = cls.root / "modules" / "fixture_voice"
         module.mkdir(parents=True)
         cls.token = "t" * 64
         cls.token_file = cls.root / "tts_token"
@@ -34,12 +34,12 @@ class TtsServiceTest(unittest.TestCase):
             "import os, time",
             "class Config:",
             "    sample_rate = 22050",
-            "class PiperVoice:",
+            "class FixtureVoice:",
             "    config = Config()",
             "    @staticmethod",
             "    def load(model_path, config_path=None):",
             "        open(os.environ['TTS_TEST_LOADED'], 'a').write('loaded\\n')",
-            "        return PiperVoice()",
+            "        return FixtureVoice()",
             "    def synthesize_wav(self, text, wav_file):",
             "        wav_file.setnchannels(1); wav_file.setsampwidth(2); wav_file.setframerate(22050)",
             "        if text == 'hold':",
@@ -58,15 +58,15 @@ class TtsServiceTest(unittest.TestCase):
         env = {
             **os.environ,
             "PYTHONPATH": str(cls.root / "modules"),
-            "PIPER_MODEL": str(cls.model),
-            "TTS_TOKEN_FILE": str(cls.token_file),
+                        "TTS_TOKEN_FILE": str(cls.token_file),
             "TTS_TEST_LOADED": str(cls.loaded),
             "TTS_TEST_STARTED": str(cls.started),
             "TTS_HOST": "127.0.0.1",
             "TTS_PORT": str(cls.port),
         }
         source = Path(__file__).with_name("main.py")
-        cls.process = subprocess.Popen([sys.executable, str(source)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        runner = "import sys,os; sys.path.insert(0,sys.argv[1]); import main; from fixture_voice.voice import FixtureVoice; main.load_configuration=lambda:(open(os.environ['TTS_TOKEN_FILE']).read().strip(),FixtureVoice.load(None)); main.main()"
+        cls.process = subprocess.Popen([sys.executable, "-c", runner, str(source.parent)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             if cls.process.poll() is not None:

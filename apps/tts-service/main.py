@@ -1,4 +1,4 @@
-"""Authenticated, single-generation Piper service for the local audio worker."""
+"""Authenticated, single-generation TTS service (native MLX Qwen)."""
 
 from __future__ import annotations
 
@@ -11,11 +11,60 @@ import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
+from types import SimpleNamespace
 
 MAX_TEXT_CHARS = 300
 MAX_REQUEST_BYTES = 4096
 MAX_WAV_BYTES = 2_000_000
 MAX_AUDIO_SECONDS = 30
+
+
+class AudioOutOfBounds(ValueError):
+    pass
+
+
+class QwenVoice:
+    """Resident MLX model producing bounded mono PCM16 WAV."""
+
+    def __init__(self):
+        if sys.platform != "darwin":
+            raise RuntimeError("qwen_requires_native_macos")
+        import mlx.core as mx
+        from mlx_audio.tts.utils import load_model
+
+        self.mx = mx
+        self.model = load_model(os.environ.get(
+            "QWEN_MODEL", "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit"
+        ))
+        self.speaker = os.environ.get("QWEN_VOICE", "Serena")
+        self.config = SimpleNamespace(sample_rate=self.model.sample_rate)
+        # Compile/evaluate kernels before publishing readiness.
+        for chunk in self.chunks("Привет!"):
+            mx.eval(chunk.audio)
+        mx.synchronize()
+
+    def chunks(self, text):
+        return self.model.generate(
+            text=text, voice=self.speaker, lang_code="Russian", stream=True,
+            streaming_interval=0.32, max_tokens=400,
+        )
+
+    def synthesize_wav(self, text, wav_file):
+        import numpy as np
+
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(self.config.sample_rate)
+        samples = 0
+        for chunk in self.chunks(text):
+            self.mx.eval(chunk.audio)
+            if chunk.sample_rate != self.config.sample_rate:
+                raise RuntimeError("qwen_sample_rate_changed")
+            audio = np.asarray(chunk.audio).reshape(-1)
+            samples += audio.size
+            if samples > self.config.sample_rate * MAX_AUDIO_SECONDS:
+                raise AudioOutOfBounds()
+            wav_file.writeframes((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
 
 
 def load_configuration():
@@ -24,14 +73,7 @@ def load_configuration():
     if len(token.encode("utf-8")) < 32:
         raise RuntimeError("tts_token_too_short")
 
-    model_path = Path(os.environ.get("PIPER_MODEL", "/models/ru_RU-irina-medium.onnx"))
-    if not model_path.is_absolute() or not model_path.is_file():
-        raise RuntimeError("piper_model_missing")
-
-    from piper.voice import PiperVoice
-
-    voice = PiperVoice.load(model_path, config_path=Path(f"{model_path}.json"))
-    return token, voice
+    return token, QwenVoice()
 
 
 class TtsServer(ThreadingHTTPServer):
@@ -133,6 +175,8 @@ class TtsHandler(BaseHTTPRequestHandler):
                 self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(data)
+            except AudioOutOfBounds:
+                self.send_json(422, {"error": "synthesized_audio_out_of_bounds"})
             except (BrokenPipeError, ConnectionResetError, TimeoutError):
                 self.close_connection = True
                 return
@@ -153,7 +197,7 @@ class TtsHandler(BaseHTTPRequestHandler):
 
 def main():
     token, voice = load_configuration()
-    host = os.environ.get("TTS_HOST", "0.0.0.0")
+    host = os.environ.get("TTS_HOST", "127.0.0.1")
     port = int(os.environ.get("TTS_PORT", "3081"))
     server = TtsServer((host, port), token, voice)
     print(json.dumps({"event": "tts_ready", "sample_rate": voice.config.sample_rate}), flush=True)

@@ -1,0 +1,4 @@
+# Native Apple Silicon runtime; install in a Python 3.12 venv.
+mlx-audio==0.5.8
+mlx==0.32.3
+numpy==2.5.3

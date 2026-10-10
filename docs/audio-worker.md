@@ -1,47 +1,65 @@
 # Автоматический голос через Loopback
 
-Статус 2026-10-04: реализованы постоянная очередь core и native audio worker на Mac. Тестовый job завершился после прямого воспроизведения CoreAudio в Character Harness Voice; пользователь подтвердил слышимость автоматической фразы на сервере. Ранее ручной путь через QuickTime был слышен на сервере.
+Статус 2026-10-10: постоянная очередь core, нативный Qwen3-TTS и audio worker работают на Mac. Пользователь подтвердил, что автоматическая цепочка Qwen → Loopback → Simple Voice Chat слышна на сервере. При первом неслышимом тесте оба клиента потеряли SVC-соединение после переподключения сервера; повторный вход каждого клиента восстановил связь. Исторический тест 2026-10-04 подтвердил только воспроизведение через CoreAudio.
 
 ## Запуск
 
-На Mac нужны Node 24, Swift toolchain и FFmpeg. Worker автоматически находит FFmpeg в стандартных каталогах Homebrew; другой путь задаётся через `FFMPEG_PATH=/absolute/path/to/ffmpeg`. Docker содержит core/БД и отдельный локальный TTS service; игровой клиент и audio worker работают нативно. Для существующей установки нужен новый локальный `secrets/audio_token` (32 случайных байта в hex), отличный от owner/engine. Setup новых secrets создаёт его автоматически; уже существующие secrets не перезаписываются. TTS provider у audio worker — Piper; macOS `say` используется только при явном `TTS_PROVIDER=say`. Если TTS service или его token недоступны, worker не подменяет выбранный голос молча.
+На Mac нужны Node 24, Swift toolchain и FFmpeg. Worker находит FFmpeg в стандартных каталогах Homebrew; другой путь задаётся через `FFMPEG_PATH`. Docker содержит core/БД; Qwen TTS, игровой клиент и audio worker работают нативно. Для существующей установки нужен новый локальный `secrets/audio_token` (32 случайных байта в hex), отличный от owner/engine. Setup новых secrets создаёт его автоматически; уже существующие secrets не перезаписываются. TTS provider у audio worker — Qwen; macOS `say` используется только при явном `TTS_PROVIDER=say`. Если TTS service или его token недоступны, worker не подменяет выбранный голос молча.
 
 ```sh
 mkdir -p work/voice-spike
 swiftc native/audio/play.swift -o work/voice-spike/harness-audio-play
 docker compose up --build -d core
-AUDIO_TOKEN_FILE=secrets/audio_token node --experimental-strip-types apps/audio-worker/main.ts
 ```
 
-### TTS service / Piper Irina
+### Qwen3-TTS 0.6B / Лада (Serena)
 
-Синтез работает отдельным HTTP service в Docker; audio worker сохраняет контроль над очередью, pause fence и локальным воспроизведением. Service привязан к host `127.0.0.1:3081` и находится в отдельной Compose bridge-сети, изолированной от core и базы данных. Он принимает только bearer-authenticated JSON с текстом до 300 символов, допускает один активный синтез и отвечает `429` без очереди на занятый запрос. Сервис загружает голос при старте и отдаёт WAV mono PCM16 22.05 kHz; native worker переводит его в 48 kHz PCM16 перед Swift player.
+Qwen работает нативно на Apple Silicon через MLX, вне Docker. Проверенная установка: MacBook Pro M1 Pro с 16 GB памяти, macOS 27.0.1, Python 3.12 и `mlx==0.32.3`; совместимость с другими моделями Mac и версиями macOS отдельно не подтверждена. Постоянный процесс
+загружает `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit` и прогревает модель
+до публикации `/ready`. Голос по умолчанию — Serena, язык — русский.
+Сервис сохраняет тот же контракт `/synthesize`: bearer-authenticated JSON
+`{"text":"..."}` → готовый WAV mono PCM16 24 kHz. Worker переводит WAV в 48 kHz
+и воспроизводит его существующим Swift player. Воспроизведение начинается после
+синтеза всей реплики; потокового playback пока нет.
 
-Создать отдельный TTS token (скрипт откажется перезаписать существующий файл), затем скачать женский русский голос Irina в ignored local directory:
+Установка (Python 3.12, нативный arm64):
 
 ```sh
+python3.12 -m venv work/qwen-tts/.venv
+work/qwen-tts/.venv/bin/python -m pip install -r apps/tts-service/requirements-qwen.txt
+# Создать token, если secrets/tts_token ещё отсутствует:
 node --experimental-strip-types scripts/setup-tts-secret.ts
-mkdir -p work/tts-models
-curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/ru/ru_RU/irina/medium/ru_RU-irina-medium.onnx' -o work/tts-models/ru_RU-irina-medium.onnx
-curl -fL 'https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/ru/ru_RU/irina/medium/ru_RU-irina-medium.onnx.json' -o work/tts-models/ru_RU-irina-medium.onnx.json
-PIPER_MODEL_DIR="$PWD/work/tts-models" docker compose --profile tts up --build -d --wait tts
 ```
 
-Чтобы использовать исходную копию модели в macOS user cache, укажи в ignored `.env` `PIPER_MODEL_DIR=/absolute/path/to/voices/irina` вместо копирования в `work/tts-models`. Файлы модели не входят в Docker build context; compose монтирует только выбранную директорию read-only.
-
-Запустить native audio worker с отдельным TTS bearer:
+Сервис по умолчанию слушает `127.0.0.1:3081`. Для другого порта задайте
+`TTS_PORT` и такой же порт в `TTS_URL` worker.
 
 ```sh
-TTS_PROVIDER=piper \
+scripts/start-qwen-tts.sh
+```
+
+В другом терминале запустить один audio worker:
+
+```sh
+TTS_PROVIDER=qwen \
 TTS_URL=http://127.0.0.1:3081 \
 TTS_TOKEN_FILE=secrets/tts_token \
 AUDIO_TOKEN_FILE=secrets/audio_token \
 node --experimental-strip-types apps/audio-worker/main.ts
 ```
 
-Каждый запрос к TTS ограничен пятью секундами на стороне audio worker; отмена, pause или истечение срока прерывают HTTP-запрос и не дают WAV попасть в player. Закрытие клиента не останавливает уже начатый вычислительный вызов Piper внутри TTS container, но вход ограничен 300 символами, ответ — 30 секундами и 2 MB. Пока этот вызов заканчивается, новая заявка получает `429` и не накапливается в очереди. TTS container запускается без root, с read-only root filesystem, без Linux capabilities и с памятью до 768 MB.
+`QWEN_VOICE` фиксирует голос (по умолчанию Serena; например, Vivian), `QWEN_MODEL` — путь
+или ID CustomVoice модели, `QWEN_PYTHON` — Python окружения. Launcher хранит кеш
+в `work/qwen-tts/hf`; первый запуск скачивает веса, последующие используют кеш.
+При необходимости `HF_HOME` можно переопределить. Запускать следует из нативного
+терминала; Metal GPU нужен и при загрузке, и при генерации.
 
-Голос по умолчанию — Irina, синтез на CPU. Другую модель можно явно выбрать через `PIPER_MODEL=/models/<voice>.onnx`; рядом нужен одноимённый `.onnx.json`. Перед распространением приложения учитывайте GPL-3.0-or-later код Piper и отдельно проверьте лицензию выбранного checkpoint. Историческое сравнение предыдущего голоса Dmitri и альтернатив: [отчёт по выбору TTS](reviews/tts-voice-selection.md).
+Timeout HTTP-запроса — 30 секунд.
+Лимиты сервиса общие: 300 символов, 30 секунд аудио, 2 MB WAV, одна генерация;
+при занятости — `429` без очереди. Отмена/пауза обрывает запрос worker и
+блокирует playback, но начатый синтез в сервисе заканчивается самостоятельно.
+Ошибки русского ударения остаются ограничением исходной модели: знаки ударения
+автоматически не добавляются.
 
 В отдельном терминале:
 
@@ -50,6 +68,27 @@ node --experimental-strip-types scripts/speak.ts 'Привет! Лада на с
 ```
 
 Loopback Character Harness Voice должен быть включён с Pass-Thru, соединённым с выходами. Клиент SVC использует это устройство как микрофон, VOICE, disabled=false и muted=false. QuickTime больше не нужен: native helper выбирает CoreAudio device UID по точному уникальному имени и подаёт PCM прямо в устройство. Системный output не переключается. Не воспроизводить другие файлы QuickTime, пока он остаётся дополнительным источником этого Loopback устройства. Тестовый экземпляр не захватывает физический микрофон.
+
+## Постоянный запуск на этом Mac
+
+Живая установка находится в `/Users/irlirion/code/character-harness`.
+Qwen и audio worker запускаются пользовательскими LaunchAgent:
+`~/Library/LaunchAgents/org.characterharness.qwen-tts.plist` и
+`~/Library/LaunchAgents/org.characterharness.audio-worker.plist`.
+Оба используют `KeepAlive`, стартуют при входе пользователя. Qwen получает
+`HF_HUB_OFFLINE=1` и использует локальный кеш `work/qwen-tts/hf`; веса должны
+быть заранее скачаны. Worker автоматически перезапускается, если при старте
+модель ещё не готова. Не запускайте второй worker вручную одновременно с агентом.
+
+Перезапуск после обновления кода:
+
+```sh
+launchctl kickstart -k gui/$(id -u)/org.characterharness.qwen-tts
+launchctl kickstart -k gui/$(id -u)/org.characterharness.audio-worker
+```
+
+Логи сервиса: `work/qwen-tts/service.log` и `service.error.log`.
+Логи worker: `work/voice-spike/audio-worker.log` и `audio-worker.error.log`.
 
 ## Управление
 
@@ -66,9 +105,11 @@ Bearer берётся из secrets/owner_token локально, не встав
 
 Очередь хранится в PostgreSQL, до трёх актуальных заданий; expiry 60 секунд, playback до 30 секунд, один активный claim. Повтор request_id с тем же текстом возвращает прежнее задание; другой текст даёт conflict. Истёкшее claimed/playing задание становится unknown и не выдаётся повторно. Pending при отмене/устаревании не воспроизводится. Epoch общий с turn: новая выдача engine turn может отозвать прежнюю речь; будущий scene revision отделяется от turn epoch перед непрерывным диалогом.
 
-Worker запрашивает Piper service либо, при явном `TTS_PROVIDER=say`, локальный macOS say/Milena и воспроизводит WAV через Swift AudioQueue. Аудиофайл удаляется после попытки. Каждые 250 мс worker проверяет разрешение; сетевой timeout core 2 секунды, запрос к TTS истекает через 5 секунд. При недоступности core или отмене worker прекращает текущую фазу и не начинает playback. Это ограниченная задержка реакции, не мгновенная распределённая отмена; остаток уже отправленного аудио SVC нельзя гарантированно отозвать.
+Worker запрашивает Qwen service либо, при явном `TTS_PROVIDER=say`, локальный macOS say/Milena и воспроизводит WAV через Swift AudioQueue. Аудиофайл удаляется после попытки. Каждые 250 мс worker проверяет разрешение; сетевой timeout core 2 секунды, запрос к TTS истекает через 30 секунд. При недоступности core или отмене worker прекращает текущую фазу и не начинает playback. Это ограниченная задержка реакции, не мгновенная распределённая отмена; остаток уже отправленного аудио SVC нельзя гарантированно отозвать.
 
 Completed означает завершение локального воспроизведения, не гарантированную слышимость всеми игроками. На crash между воспроизведением и отчётом результат unknown; не обещается exactly-once для внешнего аудио. Worker пока запускать в одном экземпляре. Postgres lease/claim не заменяет управление несколькими воспроизводящими процессами при сетевых разделениях.
+
+Если задание стало `completed`, но звук не слышен, проверьте SVC-соединение у обоих клиентов: в клиентских логах должны быть подтверждены `Server acknowledged authentication` и `Server acknowledged connection check`. После переподключения сервера клиентам может потребоваться выйти и войти снова. Также проверьте, что слушатель находится в нужной SVC-группе и в пределах дистанции слышимости.
 
 ## Проверки
 
@@ -80,6 +121,9 @@ docker compose exec -T core node --experimental-strip-types scripts/speech-smoke
 
 Smoke проверяет роли токенов, idempotency/conflict, один active claim, правильную последовательность playing/completed, pause fencing, отмену, лимит очереди и отсутствие повторной выдачи unknown. Использует синтетические задания; не запускать с работающим worker, иначе они могут прозвучать.
 
-## Следующий срез
+## Граница проверки
 
-Codex engine с отдельным login и ограниченными действиями, а также client-only Fabric bridge для игровых обращений и локального показа ответов реализованы. Синтетическое событие прошло Codex→reply→completed speech job. Живой игровой цикл ждёт перезапуска тестового экземпляра с bridge и обращения игрока. Автономный диалог и STT ещё не реализованы.
+Путь owner speech → Qwen → Loopback → Simple Voice Chat подтверждён пользователем
+на слух. Эта проверка не подтверждает полный цикл от игрового сообщения через
+LLM до озвученного ответа. Инструкции других компонентов: [Fabric bridge](../client-bridge/README.md)
+и [локальный STT](superpowers/specs/2026-10-04-gigaam-v3-stt-service-design.md).
