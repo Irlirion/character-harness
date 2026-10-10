@@ -18,7 +18,7 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
         Path path = FabricLoader.getInstance().getConfigDir().resolve("character-harness-bridge.properties");
         if (Files.notExists(path)) {
             Files.createDirectories(path.getParent());
-            Files.writeString(path, "core_url=http://127.0.0.1:3000\ncharacter_name=Север\ntoken_file=\nsystem_chat_enabled=false\nsystem_chat_server=mc.agicraft.ru:25565\nactions_enabled=false\nobservation_enabled=false\naction_server=mc.agicraft.ru:25565\nstt_enabled=false\nvoice_server=mc.agicraft.ru:25565\nstt_url=http://127.0.0.1:3082\nstt_token_file=\n");
+            Files.writeString(path, "core_url=http://127.0.0.1:3000\ncharacter_name=Лада\ntoken_file=\nsystem_chat_enabled=false\nsystem_chat_server=mc.agicraft.ru:25565\nactions_enabled=false\nobservation_enabled=false\naction_server=mc.agicraft.ru:25565\nstt_enabled=false\nvoice_server=mc.agicraft.ru:25565\nstt_url=http://127.0.0.1:3082\nstt_token_file=\n");
         }
         Properties properties = new Properties();
         try (var reader = Files.newBufferedReader(path)) { properties.load(reader); }
@@ -28,7 +28,7 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
         Path file = Path.of(tokenPath).toAbsolutePath().normalize();
         String token = Files.readString(file).trim();
         if (token.length() < 32) throw new IOException("Bridge token file is invalid");
-        String characterName = properties.getProperty("character_name", "Север").trim();
+        String characterName = properties.getProperty("character_name", "Лада").trim();
         if (characterName.isEmpty() || characterName.length() > 32) throw new IOException("character_name is invalid");
         String enabledValue = properties.getProperty("system_chat_enabled", "false").trim();
         if (!enabledValue.equalsIgnoreCase("true") && !enabledValue.equalsIgnoreCase("false")) throw new IOException("system_chat_enabled must be true or false");

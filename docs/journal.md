@@ -1,5 +1,16 @@
 # Журнал работы
 
+## 2026-10-10 — Лада вместо Севера
+
+- Добавлен отдельный YAML-пакет интернет-персоны Лады с SCP, AI и тёплой иронией; финальный текст проверен отдельными модельными диалогами.
+- Core нормализует YAML и прежний JSON в один контракт `{id, name, persona}`. Личность не получает новых инструментов или полномочий.
+- Defaults Compose и Fabric bridge переведены на Ладу, пакет `sever.json` удалён. Память прежней identity не переносится и не удаляется автоматически.
+- Изменения подготовлены поверх актуальной main, сохранив ранее принятые ограничения трафика, проверки origin/token и обновления зависимостей.
+- Прошли Docker frozen-lockfile build/typecheck (55 тестов без БД), отдельный PostgreSQL admission test, isolated Lada startup/identity isolation и MCP/SQL smoke; Fabric Gradle build/test также завершён успешно. Рабочие контейнеры и credentials не менялись.
+- Voice/STT documentation and smoke defaults now address Лада. The two-player Minecraft check remains manual; its checklist covers addressing/reply, echo suppression, and movement fences.
+- The PR also brings back the client movement/action queue, world observations, STT attribution, and current main admission and request-fencing changes. PostgreSQL integration now exercises action replay/conflict, lease/epoch/pause/session/freshness/server/audience/budget fences; it exposed and fixed inconsistent replay timestamp serialization and missing server checks on status/lease/finish.
+- Verification for the PR includes Node typecheck and tests, PostgreSQL action/admission integration, STT/TTS Python tests, STT Docker service tests, and Fabric Gradle build/tests. Live two-player voice and movement remain unverified.
+
 ## 2026-10-03
 
 - Создана папка проекта `~/code/character-harness`.
@@ -97,3 +108,22 @@
 - Исправлен turn-fence endpoint, добавлена атомарная запись ответа вместе со speech job и короткой речевой репликой. Синтетический event прошёл реальный Codex turn и native audio worker до `completed`; это не новая проверка слышимости вторым игроком.
 - Реализован client-only Fabric bridge для 1.21.11/Fabric API 0.141.6. Он принимает адресованное сообщение с UUID из server chat context через отдельный token, возвращает локальный ответ и подтверждает его доставку. Server addon не нужен.
 - Выполнены Docker Node24 typecheck/policy/RPC/model tests, isolated auth/model check, bridge auth/UUID validation check и Fabric Gradle build. Живой игровой event ожидает перезапуска отдельного test instance и проверки игроком.
+
+## 2026-10-10 — безопасность публичного репозитория
+
+- Включены GitHub secret scanning/push protection, Dependabot, приватные security reports и расширенный CodeQL. Ветка main защищена обязательными Node/Java checks и PR; Actions закреплены SHA и используют read-only token.
+- Fastify обновлён до 5.12.5, MCP SDK — до 1.31.0. Добавлены отдельные бюджеты HTTP по ролям, атомарное ограничение очереди PostgreSQL до 100 событий на персонажа и до 10 новых событий автора за минуту. Дубликаты сохраняют прежний результат без нового допуска.
+- Клиенты core допускают только loopback HTTP или Compose core:3000 и отказываются от HTTP redirects. Создание bridge secret выполняется атомарно без предварительного access.
+- Добавлены regression-тесты rate limiting, адресов/redirects, MCP roundtrip и конкурентного допуска в настоящей PostgreSQL; CI запускает отдельный тестовый PostgreSQL. Миграция 005 добавляет индексы. Параметры и ограничения описаны в SECURITY.md.
+
+### Плановые обновления Dependabot
+
+- Объединены предложения #4, #6, #7, #9, #14, #15, #16 и #17: обновлены пять GitHub Actions с сохранением SHA-закрепления, MCP SDK до 1.32.1, Pi Agent до 1.0.4 и pg/@types/pg до 8.23.1. Совместимость проверяется на общем наборе изменений через CI и Docker build.
+- Runtime и CI остаются на Node 24. Dependabot Docker major updates для node исключены; предложение Node 25 несовместимо с engines. Переходы Gradle 9, JUnit 6 и TypeScript 7 оставлены для отдельного ревью.
+
+### Крупные обновления инструментов сборки
+
+- Предложения Dependabot #8, #10 и #11 объединены для общей проверки: Gradle wrapper 9.8.0, JUnit Jupiter 6.1.3 и TypeScript 7.0.2. SHA256 distribution и wrapper JAR Gradle сверены с официальными значениями; TypeScript 7 проходит текущую конфигурацию без изменений исходного кода.
+- Обновления проверяются через Node/PostgreSQL и Java CI, CodeQL, Docker Node24 build и изолированную Java21-сборку bridge. Runtime остаётся Node 24/Java 21.
+- Новое предложение #20 с @types/node 26 не соответствует runtime Node 24. Major-обновления @types/node исключены в Dependabot; обычные обновления в линии 24 остаются доступны.
+- В общий набор включены появившиеся предложения #21–23: Codex 0.160.1, rate-limit 11.2.0 и Zod 4.6.5. Проверка типов и HTTP/MCP regression-тесты проверяют совместимость с Fastify 5 и текущими схемами; Java21-сборка и все 8 JUnit-тестов прошли.

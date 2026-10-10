@@ -1,3 +1,4 @@
+import { coreBaseUrl, coreFetch } from '../../packages/domain/core-http.ts';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createAgentSession, createExtensionRuntime, ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
@@ -6,7 +7,7 @@ import { mkdir } from 'node:fs/promises';
 import { secret } from '../../packages/domain/secrets.ts';
 import { makeTurnInput } from '../../packages/domain/conversation-context.ts';
 import { CODEX_ACTION_INSTRUCTIONS } from '../../packages/codex/instructions.ts';
-const base = process.env.CORE_URL ?? 'http://core:3000';
+const base = coreBaseUrl(process.env.CORE_URL ?? 'http://core:3000');
 const token = secret('ENGINE_TOKEN');
 const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 const provider = process.env.PI_PROVIDER;
@@ -26,7 +27,7 @@ process.once('SIGTERM', () => { stopped = true; void active?.abort(); });
 process.once('SIGINT', () => { stopped = true; void active?.abort(); });
 const wait = () => new Promise(resolve => setTimeout(resolve, 1500));
 async function request(path: string, body?: unknown) {
-  const response = await fetch(`${base}${path}`, { headers, method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(15000) });
+  const response = await coreFetch(`${base}${path}`, { headers, method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`Core request failed: ${response.status}`);
   return response.json();
 }
@@ -35,7 +36,7 @@ while (!stopped) {
   try {
     const input = await request('/engine/input');
     if (!input.event) { await wait(); continue; }
-    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { fetch: coreFetch, requestInit: { headers } }));
     const catalog = await client.listTools();
     const approved = new Set(['agent_get_status', 'agent_observe', 'memory_search', 'memory_propose', 'agent_walk', 'agent_turn', 'agent_action_status']);
     if (catalog.tools.some(t => !approved.has(t.name))) throw new Error('Unexpected tool catalog');

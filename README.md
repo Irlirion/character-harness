@@ -22,6 +22,7 @@
 
 ## Документация
 
+- [Безопасность и ограничения нагрузки](SECURITY.md)
 - [Требования и границы](docs/requirements.md)
 - [Постоянные агенты по образцу Dots](docs/persistent-agents.md)
 - [Архитектура](docs/architecture.md)
@@ -37,6 +38,7 @@
 - [Fabric client bridge](client-bridge/README.md)
 - [Codex runtime и вход через подписку](docs/codex-engine.md)
 - [Персонажи и адаптация](docs/characters.md)
+- [Персоналия Лады](characters/Lada/personalities.yml)
 - [Память и контекст](docs/memory-context.md)
 - [Создание навыков и инструментов](docs/capability-workshop.md)
 - [Оценка и улучшение](docs/evaluation.md)

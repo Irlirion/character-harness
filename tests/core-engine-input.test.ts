@@ -14,7 +14,7 @@ test('/engine/input loads prior conversation for the current scoped event and om
     snapshot:{observed_at:new Date().toISOString(),players:[{name:'Irlirion',uuid:'11111111-1111-4111-8111-111111111111',distance:1.82,line_of_sight:true}],crosshair:{type:'player'}}};
   let next:unknown=event;
   const app=buildApp({
-    principal:{characterId:'sever',audienceId:'demo-public'},tokens,allowSystemChatPublicDemo:false,allowClientWorld:true,
+    principal:{characterId:'lada',audienceId:'demo-public'},tokens,allowSystemChatPublicDemo:false,allowClientWorld:true,
     deps:{
       pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},
       status:async()=>({paused:false,epoch:7}),search:async()=>[],remember:unused,control:unused,ingest:unused,
@@ -29,8 +29,8 @@ test('/engine/input loads prior conversation for the current scoped event and om
     assert.equal(first.statusCode,200);
     assert.deepEqual(first.json().recent_conversation,history);
     assert.deepEqual(first.json().world_observation,snapshot);
-    assert.deepEqual(requested,[{characterId:'sever',audienceId:'demo-public',eventId:'event-current'}]);
-    assert.deepEqual(observationScopes,[{characterId:'sever',audienceId:'demo-public'}]);
+    assert.deepEqual(requested,[{characterId:'lada',audienceId:'demo-public',eventId:'event-current'}]);
+    assert.deepEqual(observationScopes,[{characterId:'lada',audienceId:'demo-public'}]);
     next=null;
     const idle=await app.inject({url:'/engine/input',headers:{authorization:`Bearer ${tokens.engine}`}});
     assert.deepEqual(idle.json().recent_conversation,[]);
@@ -43,7 +43,7 @@ test('/engine/input never sends a stale stored world snapshot to the turn',async
   const staleSnapshot={available:true,stale:true,connected:false,age_ms:4000,
     snapshot:{players:[{name:'OldPlayer',distance:1}]}};
   const app=buildApp({
-    principal:{characterId:'sever',audienceId:'demo-public'},tokens,allowSystemChatPublicDemo:false,allowClientWorld:true,
+    principal:{characterId:'lada',audienceId:'demo-public'},tokens,allowSystemChatPublicDemo:false,allowClientWorld:true,
     deps:{
       pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},
       status:async()=>({paused:false,epoch:8}),search:async()=>[],remember:unused,control:unused,ingest:unused,

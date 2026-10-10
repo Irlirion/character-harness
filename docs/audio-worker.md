@@ -46,7 +46,7 @@ node --experimental-strip-types apps/audio-worker/main.ts
 В отдельном терминале:
 
 ```sh
-node --experimental-strip-types scripts/speak.ts 'Привет! Север на связи.'
+node --experimental-strip-types scripts/speak.ts 'Привет! Лада на связи.'
 ```
 
 Loopback Character Harness Voice должен быть включён с Pass-Thru, соединённым с выходами. Клиент SVC использует это устройство как микрофон, VOICE, disabled=false и muted=false. QuickTime больше не нужен: native helper выбирает CoreAudio device UID по точному уникальному имени и подаёт PCM прямо в устройство. Системный output не переключается. Не воспроизводить другие файлы QuickTime, пока он остаётся дополнительным источником этого Loopback устройства. Тестовый экземпляр не захватывает физический микрофон.

@@ -28,7 +28,7 @@ export async function enqueueClientAction(p: Principal, invocationId: string, ki
     if (old) {
       const canonical=(value:Record<string,unknown>)=>JSON.stringify(Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))));
       assertReplay(canonical({kind,args:canonical(args),durationMs}), canonical({kind:old.kind,args:canonical(old.args),durationMs:old.duration_ms}));
-      await db.query('COMMIT'); return {id:old.id,state:old.state,epoch:old.epoch,expires_at:old.expires_at};
+      await db.query('COMMIT'); return {id:old.id,state:old.state,epoch:old.epoch,expires_at:new Date(old.expires_at).toISOString()};
     }
     const active = await db.query("SELECT 1 FROM client_actions WHERE character_id=$1 AND audience_id=$2 AND state IN ('pending','claimed') AND expires_at>now() LIMIT 1", [p.characterId,p.audienceId]);
     if (active.rowCount) throw new DomainError('client_action_busy');
@@ -50,7 +50,7 @@ export async function clientActionStatus(p: Principal, id: string) {
     WHERE id=$1 AND character_id=$2 AND audience_id=$3 AND state IN ('pending','claimed') AND expires_at<=now()`, [id,p.characterId,p.audienceId]);
   const row = (await pool.query(`SELECT a.id,a.state,a.kind,a.evidence,a.expires_at,
       (NOT c.paused AND c.epoch=a.epoch AND c.lease_until>now() AND EXISTS(SELECT 1 FROM world_observations o
-        WHERE o.character_id=a.character_id AND o.audience_id=a.audience_id AND o.connected AND o.session_id=a.session_id
+        WHERE o.character_id=a.character_id AND o.audience_id=a.audience_id AND o.connected AND o.server='mc.agicraft.ru:25565' AND o.session_id=a.session_id
           AND o.received_at>now()-interval '2500 milliseconds')) AS allowed
     FROM client_actions a JOIN characters c ON c.id=a.character_id
     WHERE a.id=$1 AND a.character_id=$2 AND a.audience_id=$3`, [id,p.characterId,p.audienceId])).rows[0];
@@ -61,7 +61,7 @@ export async function clientActionStatus(p: Principal, id: string) {
 export async function clientActionLease(p: Principal, id: string, claimId: string) {
   const r = (await pool.query(`SELECT (a.state='claimed' AND a.claim_id=$4 AND NOT c.paused AND c.epoch=a.epoch
       AND c.lease_until>now() AND a.expires_at>now() AND o.connected AND o.session_id=a.session_id
-      AND o.received_at>now()-interval '2500 milliseconds') AS valid
+      AND o.server='mc.agicraft.ru:25565' AND o.received_at>now()-interval '2500 milliseconds') AS valid
     FROM client_actions a JOIN characters c ON c.id=a.character_id LEFT JOIN world_observations o ON o.character_id=a.character_id AND o.audience_id=a.audience_id
     WHERE a.id=$1 AND a.character_id=$2 AND a.audience_id=$3`, [id,p.characterId,p.audienceId,claimId])).rows[0];
   if (!r) throw new DomainError('client_action_not_found');
@@ -99,9 +99,9 @@ export async function finishClientAction(p: Principal, id: string, claimId: stri
     const c = (await db.query('SELECT paused,epoch,lease_until FROM characters WHERE id=$1 FOR UPDATE', [p.characterId])).rows[0];
     const a = (await db.query(`SELECT state,claim_id,epoch,session_id,expires_at FROM client_actions WHERE id=$1 AND character_id=$2 AND audience_id=$3 FOR UPDATE`, [id,p.characterId,p.audienceId])).rows[0];
     if (!a || a.claim_id !== claimId || a.state !== 'claimed') throw new DomainError('invalid_client_action_claim');
-    const obs=(await db.query(`SELECT connected,session_id,received_at FROM world_observations WHERE character_id=$1 AND audience_id=$2 FOR SHARE`,[p.characterId,p.audienceId])).rows[0];
+    const obs=(await db.query(`SELECT connected,server,session_id,received_at FROM world_observations WHERE character_id=$1 AND audience_id=$2 FOR SHARE`,[p.characterId,p.audienceId])).rows[0];
     const revoked = !c || c.paused || c.epoch !== a.epoch || !c.lease_until || new Date(c.lease_until).getTime() <= Date.now() || new Date(a.expires_at).getTime() <= Date.now()
-      || !obs || !obs.connected || obs.session_id!==a.session_id || new Date(obs.received_at).getTime() < Date.now()-2500;
+      || !obs || !obs.connected || obs.server!=='mc.agicraft.ru:25565' || obs.session_id!==a.session_id || new Date(obs.received_at).getTime() < Date.now()-2500;
     const next = revoked ? 'cancelled' : state;
     await db.query('UPDATE client_actions SET state=$2,evidence=$3,finished_at=now() WHERE id=$1', [id,next,evidence]);
     await db.query('COMMIT');

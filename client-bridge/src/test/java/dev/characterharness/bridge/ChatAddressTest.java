@@ -9,23 +9,23 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class ChatAddressTest {
     @Test
     void matchesAuthorTextButNotFabricDecoratedDisplayText() {
-        var addressed = ChatAddress.pattern("Север");
+        var addressed = ChatAddress.pattern("Лада");
 
-        assertEquals("привет", ChatAddress.extract("@Север привет", addressed));
-        assertNull(ChatAddress.extract("<Player> @Север привет", addressed));
+        assertEquals("привет", ChatAddress.extract("@Лада привет", addressed));
+        assertNull(ChatAddress.extract("<Player> @Лада привет", addressed));
     }
 
     @Test
     void forwardsPartiallyFilteredContentOnlyAfterApplyingMask() {
-        String signedContent = "@Север секрет";
+        String signedContent = "@Лада секрет";
         FilterMask mask = new FilterMask(signedContent.length());
         for (int i = signedContent.indexOf("секрет"); i < signedContent.length(); i++) mask.markFiltered(i);
 
-        assertEquals("######", ChatAddress.extract(signedContent, mask, ChatAddress.pattern("Север")));
+        assertEquals("######", ChatAddress.extract(signedContent, mask, ChatAddress.pattern("Лада")));
     }
 
     @Test
     void skipsFullyFilteredContent() {
-        assertNull(ChatAddress.extract("@Север секрет", FilterMask.FULLY_FILTERED, ChatAddress.pattern("Север")));
+        assertNull(ChatAddress.extract("@Лада секрет", FilterMask.FULLY_FILTERED, ChatAddress.pattern("Лада")));
     }
 }

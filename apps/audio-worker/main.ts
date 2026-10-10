@@ -1,3 +1,4 @@
+import { coreBaseUrl, coreFetch } from '../../packages/domain/core-http.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -6,7 +7,7 @@ import { spokenText } from '../../packages/domain/speech-text.ts';
 
 if (process.platform !== 'darwin') throw new Error('Audio worker requires macOS');
 
-const base = process.env.CORE_URL ?? 'http://127.0.0.1:3000';
+const base = coreBaseUrl(process.env.CORE_URL ?? 'http://127.0.0.1:3000');
 const url = new URL(base);
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error('Local core required');
 
@@ -44,7 +45,7 @@ process.once('SIGTERM', stop);
 const wait = () => new Promise<void>(r => setTimeout(r, 500));
 
 async function api(path: string, body?: unknown) {
-  const r = await fetch(base + path, {
+  const r = await coreFetch(base + path, {
     method: body ? 'POST' : 'GET',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
@@ -126,6 +127,7 @@ async function synthesizePiper(file: string, job: Job, spoken: string) {
   const controller = new AbortController();
   const request = fetch(new URL('/synthesize', ttsUrl), {
     method: 'POST',
+    redirect: 'error',
     headers: { Authorization: `Bearer ${ttsToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ text: spoken }),
     signal: controller.signal,

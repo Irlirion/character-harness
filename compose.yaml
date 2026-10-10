@@ -32,7 +32,8 @@ services:
       AUDIO_TOKEN_FILE: /run/secrets/audio_token
       BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
       BRIDGE_CLIENT_WORLD_ENABLED: ${BRIDGE_CLIENT_WORLD_ENABLED:-false}
-      CHARACTER_ID: sever
+      CHARACTER_ID: ${CHARACTER_ID:-lada}
+      CHARACTER_FILE: ${CHARACTER_FILE:-characters/Lada/personalities.yml}
       AUDIENCE_ID: demo-public
       BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO: ${BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO:-false}
     secrets: [database_url, engine_token, owner_token, audio_token, bridge_token]

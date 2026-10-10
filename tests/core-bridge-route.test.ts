@@ -12,7 +12,7 @@ function harness(opts:{allowSystemChatPublicDemo?:boolean;allowClientWorld?:bool
   const ingested:{provenance:string;trust:string}[]=[];
   const actionReasons:string[]=[];
   const app=buildApp({
-    principal:{characterId:'sever',audienceId:opts.audienceId??'demo-public'},
+    principal:{characterId:'lada',audienceId:opts.audienceId??'demo-public'},
     tokens:TOKENS,allowSystemChatPublicDemo:opts.allowSystemChatPublicDemo??true,allowClientWorld:opts.allowClientWorld??false,
     deps:{
       pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},
@@ -123,7 +123,7 @@ test('client world ingestion and action claiming require an explicit core opt-in
 test('reply delivery and acknowledgement cover the addressed voice namespace',async()=>{
   const queries:string[]=[];
   const app=buildApp({
-    principal:{characterId:'sever',audienceId:'demo-public'},
+    principal:{characterId:'lada',audienceId:'demo-public'},
     tokens:TOKENS,allowSystemChatPublicDemo:true,allowClientWorld:true,
     deps:{pool:{query:async(sql:string)=>{queries.push(sql);return {rows:[],rowCount:0};},end:async()=>{}},
       status:unused,search:unused,remember:unused,control:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,

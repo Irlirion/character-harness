@@ -6,3 +6,6 @@ data
 .env
 **/__pycache__/
 *.py[cod]
+.env.*
+*.pem
+*.key

@@ -1,6 +1,11 @@
 node_modules/
 work/
 .env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
 secrets/
 data/
 *.log

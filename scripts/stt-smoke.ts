@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 const base = process.env.STT_URL ?? 'http://127.0.0.1:3082';
 const token = (await readFile(process.env.STT_TOKEN_FILE ?? 'secrets/stt_token', 'utf8')).trim();
-const phrase = process.env.STT_SMOKE_PHRASE ?? 'Север, повернись налево';
+const phrase = process.env.STT_SMOKE_PHRASE ?? 'Лада, повернись налево';
 const voice = process.env.STT_SMOKE_VOICE ?? 'Milena';
 const MAX_AUDIO_BYTES = 768_000;
 const STDERR_TAIL_CHARS = 2048;

@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # Types must describe the Node 24 runtime, not a newer major release.
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
+  - package-ecosystem: gradle
+    directory: /client-bridge
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # Runtime and CI deliberately stay on the Node 24 release line.
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]

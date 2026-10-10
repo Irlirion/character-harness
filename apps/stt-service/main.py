@@ -90,13 +90,8 @@ class GigaamRecognizer(Recognizer):
 
 class SttServer(ThreadingHTTPServer):
     daemon_threads = True
-    # A backlog of one is deliberate boundedness, not a tuned value. Overflowing it resets the
-    # connection, so the client sees ECONNRESET instead of a clean 429 busy: 4 failures in 10 at
-    # concurrency 2 and 18 in 25 at 5, where the stdlib default of 5 shows none at 5. That stays
-    # unreachable only because ClientBridge's sttIo pool is ThreadPoolExecutor(1, 1, ...), whose single
-    # worker issues the request synchronously, so at most one socket reaches this service. A second
-    # core thread there would make it live.
-    request_queue_size = 1
+    # Queue TCP handshakes; inference_slot still rejects concurrent work with HTTP 429.
+    request_queue_size = 5
     allow_reuse_address = True
 
     def __init__(self, address, service: SttService):

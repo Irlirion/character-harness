@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
@@ -46,6 +47,20 @@ export type BuildAppOptions = {
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
 export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
+// Roles share a token, so budget by role rather than IP or attacker-supplied headers.
+// Audio and action leases poll frequently; keep bridge event ingestion in its own budget.
+function rateBudget(path: string) {
+  if (path === '/bridge/events') return { key: 'bridge-events', max: 180 };
+  const role = requiredRole(path) ?? 'owner';
+  return { key: role, max: { audio: 600, engine: 300, bridge: 900, owner: 120 }[role] };
+}
+app.register(rateLimit, {
+  hook: 'preHandler', timeWindow: '1 minute',
+  max: req => rateBudget(requestPath(req.url)).max,
+  keyGenerator: req => rateBudget(requestPath(req.url)).key
+});
+// Install routes after the plugin's onRoute hook is ready.
+app.after(() => {
 const { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken } = tokens;
 const { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent,
   enqueueSpeech, claimSpeech, speechState, updateSpeech, enqueueClientAction, clientActionStatus, clientActionLease, claimClientAction, finishClientAction,
@@ -73,6 +88,10 @@ app.addHook('onRequest', async (req, reply) => {
   if (required === null || !matchesToken(req.headers.authorization, required)) return reply.code(401).send({ error: 'unauthorized' });
 });
 app.setErrorHandler((error, _req, reply) => {
+  if (error instanceof Error && 'statusCode' in error && error.statusCode === 429) return reply.code(429).send({ error: 'rate_limit_exceeded' });
+  if (error instanceof DomainError && ['event_queue_full', 'author_rate_limit'].includes(error.code)) {
+    return reply.header('Retry-After', '60').code(429).send({ error: error.code });
+  }
   if (error instanceof DomainError) return reply.code(409).send({ error: error.code });
   if (error instanceof z.ZodError) return reply.code(400).send({ error: 'invalid_input' });
   app.log.error({ name: error instanceof Error ? error.name : 'unknown' }, 'Request failed');
@@ -240,6 +259,6 @@ app.route({ method: ['GET', 'DELETE'], url: '/mcp', handler: async (_req, reply)
 const shutdown = async () => { await app.close(); await pool.end(); };
 process.once('SIGTERM', () => { void shutdown(); });
 process.once('SIGINT', () => { void shutdown(); });
-
+});
 return app;
 }

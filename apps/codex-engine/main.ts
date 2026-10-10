@@ -1,3 +1,4 @@
+import { coreBaseUrl, coreFetch } from '../../packages/domain/core-http.ts';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { CodexRpc } from '../../packages/codex/rpc.ts';
@@ -11,10 +12,10 @@ const home=process.env.HARNESS_CODEX_HOME??'/data/codex';
 const cwd=process.env.HARNESS_CODEX_WORKSPACE??'/data/workspace';
 await configureCodex(home,cwd);
 const rpc=new CodexRpc(process.env.CODEX_BIN??'/app/node_modules/.bin/codex',cwd,home);
-const base=process.env.CORE_URL??'http://core:3000';
+const base=coreBaseUrl(process.env.CORE_URL??'http://core:3000');
 const headers={Authorization:`Bearer ${secret('ENGINE_TOKEN')}`,'Content-Type':'application/json'};
 async function api(path:string,body?:unknown){
- const r=await fetch(base+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000)});
+ const r=await coreFetch(base+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000)});
  if(!r.ok)throw new Error('core_request_failed');return r.json();
 }
 let stopped=false;let threadId:string|undefined;let turnId:string|undefined;
@@ -39,7 +40,7 @@ while(!stopped){
   try{
    const input=await api('/engine/input');if(!input.event){await sleep(1000);continue;}
    pendingEventId=input.event.id;
-  await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{requestInit:{headers}}));
+  await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{fetch:coreFetch,requestInit:{headers}}));
   const catalog=(await client.listTools()).tools;
   const allowed=new Set(['agent_get_status','agent_observe','memory_search','memory_propose','agent_walk','agent_turn','agent_action_status']);
   if(catalog.some(t=>!allowed.has(t.name)))throw new Error('unexpected_catalog');

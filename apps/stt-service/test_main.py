@@ -5,9 +5,14 @@ import tempfile
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+import numpy as np
 from pathlib import Path
 
-from main import SttServer, SttService, MAX_AUDIO_BYTES, MIN_AUDIO_BYTES, read_token
+from main import GigaamRecognizer, SttServer, SttService, MAX_AUDIO_BYTES, MIN_AUDIO_BYTES, read_token
 
 
 TOKEN = "t" * 40
@@ -118,6 +123,32 @@ class SttServiceTest(unittest.TestCase):
         self.assertFalse(first.is_alive())
         self.assertEqual(result[0][0], 200)
 
+    def test_parallel_clients_receive_busy_json_instead_of_connection_resets(self):
+        entered = threading.Event()
+        release = threading.Event()
+        def transcribe(_pcm):
+            entered.set()
+            if not release.wait(10):
+                raise RuntimeError("test_inference_timeout")
+            return "готово"
+        self.server.service.transcribe = transcribe
+        with ThreadPoolExecutor(max_workers=6) as clients:
+            first = clients.submit(self.post, VALID_PCM)
+            try:
+                self.assertTrue(entered.wait(2))
+                barrier = threading.Barrier(5)
+                def busy_request():
+                    barrier.wait(timeout=2)
+                    return self.post(VALID_PCM)
+                busy = [clients.submit(busy_request) for _ in range(5)]
+                for request in busy:
+                    status, body = request.result(timeout=3)
+                    self.assertEqual(status, 429)
+                    self.assertEqual(json.loads(body), {"error": "busy"})
+            finally:
+                release.set()
+            self.assertEqual(first.result(timeout=3)[0], 200)
+
     def test_token_file_is_minimum_length(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             token_file = Path(temp_dir) / "token"
@@ -151,6 +182,49 @@ class RecognizerConversionTest(unittest.TestCase):
         self.assertAlmostEqual(float(captured["samples"][0]), -1.0, places=6)
         self.assertAlmostEqual(float(captured["samples"][1]), 0.0, places=6)
         self.assertAlmostEqual(float(captured["samples"][2]), 32767 / 32768, places=6)
+
+
+class GigaamRecognizerTest(unittest.TestCase):
+    def test_load_selects_pinned_model_quantization_cpu_and_thread_options(self):
+        adapter = Mock()
+        adapter.recognize.return_value = "лада здесь"
+        loader = Mock(return_value=adapter)
+        options = SimpleNamespace()
+        session_options = Mock(return_value=options)
+        recognizer = GigaamRecognizer(Path("/models"), 4)
+        self.assertFalse(recognizer.is_loaded())
+        with patch.dict("sys.modules", {
+            "onnx_asr": SimpleNamespace(load_model=loader),
+            "onnxruntime": SimpleNamespace(SessionOptions=session_options),
+        }):
+            recognizer.load()
+        session_options.assert_called_once_with()
+        loader.assert_called_once_with(
+            "gigaam-v3-ctc", Path("/models"), quantization="int8",
+            sess_options=options, providers=["CPUExecutionProvider"],
+        )
+        self.assertEqual(options.intra_op_num_threads, 4)
+        self.assertEqual(options.inter_op_num_threads, 1)
+        self.assertTrue(recognizer.is_loaded())
+        samples = np.zeros(MIN_AUDIO_BYTES // 2, dtype=np.float32)
+        self.assertEqual(recognizer.transcribe(samples, 48000), "лада здесь")
+        adapter.recognize.assert_called_once_with(samples, sample_rate=48000)
+
+    def test_unloaded_adapter_refuses_inference_and_threads_have_a_floor(self):
+        recognizer = GigaamRecognizer(Path("/models"), 0)
+        self.assertEqual(recognizer.threads, 1)
+        with self.assertRaisesRegex(RuntimeError, "^gigaam_not_loaded$"):
+            recognizer.transcribe(np.zeros(1440, dtype=np.float32), 48000)
+
+    def test_failed_load_does_not_report_readiness(self):
+        recognizer = GigaamRecognizer(Path("/models"), 2)
+        with patch.dict("sys.modules", {
+            "onnx_asr": SimpleNamespace(load_model=Mock(side_effect=ValueError("model missing"))),
+            "onnxruntime": SimpleNamespace(SessionOptions=lambda: SimpleNamespace()),
+        }):
+            with self.assertRaises(ValueError):
+                recognizer.load()
+        self.assertFalse(recognizer.is_loaded())
 
 
 class RecognitionFailureTest(unittest.TestCase):

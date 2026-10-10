@@ -17,7 +17,7 @@ dependencies {
     modImplementation 'net.fabricmc:fabric-loader:0.19.5'
     modImplementation 'net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11'
     modCompileOnly 'de.maxhenkel.voicechat:voicechat-api:2.6.24'
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testImplementation 'org.junit.jupiter:junit-jupiter:6.1.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
