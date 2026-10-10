@@ -18,6 +18,7 @@ final class ClientActionController {
     private static final int MAX_DIAGNOSTIC_BLOCKS=12;
     private static final int MAX_DIAGNOSTIC_SHAPES=64;
     private static final double MAX_SAFE_STEP_DOWN=0.5;
+    private static final double MAX_SUPPORT_DIAGNOSTIC_DEPTH=1.5;
     private static final double SUPPORT_EPSILON=1.0e-4;
     record Action(String id, String claimId, String kind, double forward, double strafe,
                   double yawDegrees, double pitchDegrees, int durationMs, long expiresAtMs, String sessionId) {}
@@ -173,12 +174,28 @@ final class ClientActionController {
 
     private static boolean hasSupportBelow(Box footprint,double feetY,Box shape) {
         double drop=feetY-shape.maxY;
-        return drop>=-SUPPORT_EPSILON&&drop<=MAX_SAFE_STEP_DOWN+SUPPORT_EPSILON
-                &&shape.maxX>footprint.minX+SUPPORT_EPSILON&&shape.minX<footprint.maxX-SUPPORT_EPSILON
+        return intersectsSupportFootprint(footprint,shape)
+                &&drop>=-SUPPORT_EPSILON&&drop<=MAX_SAFE_STEP_DOWN+SUPPORT_EPSILON;
+    }
+
+    private static boolean intersectsSupportFootprint(Box footprint,Box shape) {
+        return shape.maxX>footprint.minX+SUPPORT_EPSILON&&shape.minX<footprint.maxX-SUPPORT_EPSILON
                 &&shape.maxZ>footprint.minZ+SUPPORT_EPSILON&&shape.minZ<footprint.maxZ-SUPPORT_EPSILON;
     }
 
-    record StepCheck(boolean collisionAhead,boolean supportAhead,boolean unknownChunk,String obstacleBlockId,Double estimatedStepUp) {
+    static Double nearestSupportDrop(Box footprint,double feetY,List<Box> worldShapes) {
+        double nearest=Double.POSITIVE_INFINITY;
+        for(Box shape:worldShapes){
+            double drop=feetY-shape.maxY;
+            if(intersectsSupportFootprint(footprint,shape)&&drop>=-SUPPORT_EPSILON
+                    &&drop<=MAX_SUPPORT_DIAGNOSTIC_DEPTH+SUPPORT_EPSILON)
+                nearest=Math.min(nearest,Math.min(MAX_SUPPORT_DIAGNOSTIC_DEPTH,Math.max(0,drop)));
+        }
+        return Double.isFinite(nearest)?nearest:null;
+    }
+
+    record StepCheck(boolean collisionAhead,boolean supportAhead,boolean unknownChunk,String obstacleBlockId,Double estimatedStepUp,
+                     String nearestSupportBlockId,Double nearestSupportDrop) {
         String status(boolean onGround) {
             if(!onGround)return "not_grounded";
             if(unknownChunk)return "unknown_chunk";
@@ -191,6 +208,8 @@ final class ClientActionController {
             target.addProperty("step_status",status(onGround));
             if(obstacleBlockId!=null)target.addProperty("obstacle_block_id",obstacleBlockId);
             if(estimatedStepUp!=null)target.addProperty("estimated_step_up",estimatedStepUp);
+            if(nearestSupportBlockId!=null)target.addProperty("nearest_support_block_id",nearestSupportBlockId);
+            if(nearestSupportDrop!=null)target.addProperty("nearest_support_drop",nearestSupportDrop);
         }
         void addEvidence(JsonObject target,boolean onGround) {
             target.addProperty("on_ground",onGround);
@@ -208,23 +227,47 @@ final class ClientActionController {
         int minY=net.minecraft.util.math.MathHelper.floor(shifted.minY+1.0e-7),maxY=net.minecraft.util.math.MathHelper.floor(shifted.maxY-1.0e-7);
         int minZ=net.minecraft.util.math.MathHelper.floor(shifted.minZ+1.0e-7),maxZ=net.minecraft.util.math.MathHelper.floor(shifted.maxZ-1.0e-7);
         long blockCount=(long)(maxX-minX+1)*(maxY-minY+1)*(maxZ-minZ+1);
-        if(blockCount<=0||blockCount>MAX_DIAGNOSTIC_BLOCKS)return new StepCheck(true,false,true,null,null);
+        if(blockCount<=0||blockCount>MAX_DIAGNOSTIC_BLOCKS)return new StepCheck(true,false,true,null,null,null,null);
         for(int x=minX;x<=maxX;x++)for(int y=minY;y<=maxY;y++)for(int z=minZ;z<=maxZ;z++)
-            if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null);
+            if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null,null,null);
         int supportMinY=net.minecraft.util.math.MathHelper.floor(shifted.minY-MAX_SAFE_STEP_DOWN-SUPPORT_EPSILON);
         int supportMaxY=net.minecraft.util.math.MathHelper.floor(shifted.minY-SUPPORT_EPSILON);
         long supportBlockCount=(long)(maxX-minX+1)*(supportMaxY-supportMinY+1)*(maxZ-minZ+1);
-        if(supportBlockCount<=0||supportBlockCount>MAX_DIAGNOSTIC_BLOCKS)return new StepCheck(true,false,true,null,null);
+        if(supportBlockCount<=0||supportBlockCount>MAX_DIAGNOSTIC_BLOCKS)return new StepCheck(true,false,true,null,null,null,null);
         for(int x=minX;x<=maxX;x++)for(int y=supportMinY;y<=supportMaxY;y++)for(int z=minZ;z<=maxZ;z++)
-            if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null);
+            if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null,null,null);
         boolean collision=client.world.getBlockCollisions(client.player,shifted).iterator().hasNext();
         boolean supportAhead=false;int inspectedSupportShapes=0;
         support: for(int x=minX;x<=maxX;x++)for(int y=supportMinY;y<=supportMaxY;y++)for(int z=minZ;z<=maxZ;z++){
             BlockPos pos=new BlockPos(x,y,z);
             VoxelShape shape=client.world.getBlockState(pos).getCollisionShape(client.world,pos,ShapeContext.of(client.player));
             for(Box local:shape.getBoundingBoxes()){
-                if(inspectedSupportShapes++>=MAX_DIAGNOSTIC_SHAPES)return new StepCheck(collision,false,true,null,null);
+                if(inspectedSupportShapes++>=MAX_DIAGNOSTIC_SHAPES)return new StepCheck(collision,false,true,null,null,null,null);
                 if(hasSupportBelow(shifted,shifted.minY,local.offset(x,y,z))){supportAhead=true;break support;}
+            }
+        }
+        String nearestSupportBlockId=null;Double nearestSupportDrop=null;
+        int diagnosticMinY=net.minecraft.util.math.MathHelper.floor(shifted.minY-MAX_SUPPORT_DIAGNOSTIC_DEPTH-SUPPORT_EPSILON);
+        int diagnosticMaxY=net.minecraft.util.math.MathHelper.floor(shifted.minY-SUPPORT_EPSILON);
+        long diagnosticBlockCount=(long)(maxX-minX+1)*(diagnosticMaxY-diagnosticMinY+1)*(maxZ-minZ+1);
+        if(diagnosticBlockCount>0&&diagnosticBlockCount<=MAX_DIAGNOSTIC_BLOCKS){
+            boolean loaded=true;
+            for(int x=minX;x<=maxX&&loaded;x++)for(int y=diagnosticMinY;y<=diagnosticMaxY&&loaded;y++)for(int z=minZ;z<=maxZ;z++)
+                if(!client.world.isChunkLoaded(new BlockPos(x,y,z))){loaded=false;break;}
+            if(loaded){
+                int inspected=0;double nearest=Double.POSITIVE_INFINITY;
+                supportScan: for(int x=minX;x<=maxX;x++)for(int y=diagnosticMinY;y<=diagnosticMaxY;y++)for(int z=minZ;z<=maxZ;z++){
+                    BlockPos pos=new BlockPos(x,y,z);var state=client.world.getBlockState(pos);
+                    VoxelShape shape=state.getCollisionShape(client.world,pos,ShapeContext.of(client.player));
+                    for(Box local:shape.getBoundingBoxes()){
+                        if(inspected++>=MAX_DIAGNOSTIC_SHAPES)break supportScan;
+                        Box worldBox=local.offset(x,y,z);double drop=shifted.minY-worldBox.maxY;
+                        if(!intersectsSupportFootprint(shifted,worldBox)||drop< -SUPPORT_EPSILON
+                                ||drop>MAX_SUPPORT_DIAGNOSTIC_DEPTH+SUPPORT_EPSILON||drop>=nearest)continue;
+                        String blockId=Registries.BLOCK.getId(state.getBlock()).toString();if(blockId.length()>128)continue;
+                        nearest=Math.min(MAX_SUPPORT_DIAGNOSTIC_DEPTH,Math.max(0,drop));nearestSupportDrop=nearest;nearestSupportBlockId=blockId;
+                    }
+                }
             }
         }
         String obstacleBlockId=null;Double estimatedStepUp=null;
@@ -245,7 +288,7 @@ final class ClientActionController {
                 }
             }
         }
-        return new StepCheck(collision,supportAhead,false,obstacleBlockId,estimatedStepUp);
+        return new StepCheck(collision,supportAhead,false,obstacleBlockId,estimatedStepUp,nearestSupportBlockId,nearestSupportDrop);
     }
 
     private static Result result(String state, String reason) {

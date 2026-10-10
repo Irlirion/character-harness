@@ -13,11 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StepCheckTest {
     @Test void reportsGroundingCollisionSupportAndUnknownChunksSeparately() {
-        assertEquals("not_grounded", new ClientActionController.StepCheck(false, true, false, null, null).status(false));
-        assertEquals("collision", new ClientActionController.StepCheck(true, true, false, "minecraft:oak_leaves", 1.0).status(true));
-        assertEquals("no_support", new ClientActionController.StepCheck(false, false, false, null, null).status(true));
-        assertEquals("unknown_chunk", new ClientActionController.StepCheck(true, false, true, null, null).status(true));
-        assertEquals("clear", new ClientActionController.StepCheck(false, true, false, null, null).status(true));
+        assertEquals("not_grounded", new ClientActionController.StepCheck(false, true, false, null, null, null, null).status(false));
+        assertEquals("collision", new ClientActionController.StepCheck(true, true, false, "minecraft:oak_leaves", 1.0, null, null).status(true));
+        assertEquals("no_support", new ClientActionController.StepCheck(false, false, false, null, null, null, null).status(true));
+        assertEquals("unknown_chunk", new ClientActionController.StepCheck(true, false, true, null, null, null, null).status(true));
+        assertEquals("clear", new ClientActionController.StepCheck(false, true, false, null, null, null, null).status(true));
     }
 
     @Test void recognizesFractionalFeetAboveActualCollisionSupport() {
@@ -48,6 +48,21 @@ class StepCheckTest {
         assertFalse(ClientActionController.hasSupportBelow(footprint,67.5,fullBlockDown));
         assertFalse(ClientActionController.hasSupportBelow(footprint,67.5,lowSlab));
         assertFalse(ClientActionController.hasSupportBelow(footprint,67.5,List.of()));
+    }
+
+    @Test void reportsNearestLowerSupportWithoutChangingSafeStepAcceptance() {
+        Box footprint=new Box(0.2,67.5,0.2,0.8,69.3,0.8);
+        List<Box> halfBlockDown=worldBoxes(VoxelShapes.fullCube(),0,66,0);
+        List<Box> oneBlockDown=worldBoxes(VoxelShapes.fullCube(),0,65,0);
+        List<Box> outsideFootprint=worldBoxes(VoxelShapes.fullCube(),2,66,0);
+
+        assertTrue(ClientActionController.hasSupportBelow(footprint,67.5,halfBlockDown));
+        assertEquals(0.5,ClientActionController.nearestSupportDrop(footprint,67.5,halfBlockDown));
+        assertFalse(ClientActionController.hasSupportBelow(footprint,67.5,oneBlockDown));
+        assertEquals(1.5,ClientActionController.nearestSupportDrop(footprint,67.5,oneBlockDown));
+        assertEquals(1.5,ClientActionController.nearestSupportDrop(footprint,67.5,worldBoxes(VoxelShapes.fullCube(),0,65,0)));
+        assertEquals(null,ClientActionController.nearestSupportDrop(footprint,67.5,outsideFootprint));
+        assertEquals(null,ClientActionController.nearestSupportDrop(footprint,67.5,List.of()));
     }
 
     private static List<Box> worldBoxes(VoxelShape shape,int x,int y,int z) {

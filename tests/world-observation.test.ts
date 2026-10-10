@@ -9,7 +9,7 @@ const base={
 };
 
 test('world observation accepts bounded forward-obstacle diagnostics',()=>{
-  const parsed=worldObservationSchema.parse({...base,self:{...base.self,step_status:'collision',obstacle_block_id:'minecraft:oak_leaves',estimated_step_up:1}});
+  const parsed=worldObservationSchema.parse({...base,self:{...base.self,step_status:'collision',obstacle_block_id:'minecraft:oak_leaves',estimated_step_up:1,nearest_support_block_id:'minecraft:stone',nearest_support_drop:1.25}});
   assert.equal(parsed.connected,true);
   if(parsed.connected)assert.equal(parsed.self.step_status,'collision');
 });
@@ -18,4 +18,5 @@ test('world observation rejects invalid or oversized obstacle diagnostics',()=>{
   assert.equal(worldObservationSchema.safeParse({...base,self:{...base.self,step_status:'open'} }).success,false);
   assert.equal(worldObservationSchema.safeParse({...base,self:{...base.self,obstacle_block_id:'not-an-id'} }).success,false);
   assert.equal(worldObservationSchema.safeParse({...base,self:{...base.self,estimated_step_up:2.01} }).success,false);
+  assert.equal(worldObservationSchema.safeParse({...base,self:{...base.self,nearest_support_drop:1.51} }).success,false);
 });

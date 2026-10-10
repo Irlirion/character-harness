@@ -163,6 +163,7 @@ app.post('/bridge/actions/:id', async req => {
     on_ground:z.boolean().optional(),collision_ahead:z.boolean().optional(),support_ahead:z.boolean().optional(),
     step_status:z.enum(['clear','not_grounded','collision','no_support','unknown_chunk']).optional(),
     obstacle_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),estimated_step_up:z.number().finite().min(0).max(2).optional(),
+    nearest_support_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),nearest_support_drop:z.number().finite().min(0).max(1.5).optional(),
     start_x:coordinate.optional(),start_y:yCoordinate.optional(),start_z:coordinate.optional(),end_x:coordinate.optional(),end_y:yCoordinate.optional(),end_z:coordinate.optional(),
     start_yaw:z.number().finite().min(-360).max(360).optional(),end_yaw:z.number().finite().min(-360).max(360).optional(),
     start_pitch:z.number().finite().min(-90).max(90).optional(),end_pitch:z.number().finite().min(-90).max(90).optional()}).strict();
@@ -208,7 +209,7 @@ function gateway() {
   const server = new McpServer({ name: 'character-harness', version: '0.1.0' });
   const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }] });
   server.registerTool('agent_get_status', { description: 'Read current character status', inputSchema: {} }, async () => result(await status(principal)));
-  server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map.',inputSchema:{}},async()=>result(await currentWorldObservation()));
+  server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map. nearest_support_block_id/drop are diagnostic only; walking still requires support_ahead=true, which only accepts support within 0.5 blocks.',inputSchema:{}},async()=>result(await currentWorldObservation()));
   server.registerTool('memory_search', { description: 'Search only the current character and audience memory', inputSchema: { query: z.string().max(200).default('') } }, async ({ query }) => result(await search(principal, query)));
   server.registerTool('memory_propose', {
     description: 'Save a personal, unverified note for this audience; do not save secrets or treat guesses as facts',
@@ -239,7 +240,7 @@ function gateway() {
     catch (error) { if (!(error instanceof DomainError)) throw error; return { ...result({error:error.code}), isError:true }; }
   });
   server.registerTool('agent_action_status', {
-    description:'Read the status and local client evidence for one of your previously queued walk/turn operations. For blocked walking, explain step_status and obstacle_block_id/estimated_step_up when present; this is a bounded diagnostic estimate, not permission to step over the block, and the crosshair target is not necessarily the obstacle. Only state=completed proves it succeeded.',
+    description:'Read the status and local client evidence for one of your previously queued walk/turn operations. For blocked walking, explain step_status, obstacle_block_id/estimated_step_up, and nearest_support_block_id/drop when present; these are bounded diagnostics, not permission to step over a block. The crosshair target is not necessarily the obstacle. Only state=completed proves it succeeded.',
     inputSchema:{id:z.string().uuid()}
   }, async ({id}) => {
     try { const current=await clientActionStatus(principal,id);return result(allowClientWorld?current:{...current,allowed:false}); }
