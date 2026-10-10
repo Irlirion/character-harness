@@ -9,6 +9,7 @@ import net.minecraft.block.ShapeContext;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.shape.VoxelShape;
 
+import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.Objects;
@@ -16,6 +17,8 @@ import java.util.Objects;
 final class ClientActionController {
     private static final int MAX_DIAGNOSTIC_BLOCKS=12;
     private static final int MAX_DIAGNOSTIC_SHAPES=64;
+    private static final double MAX_SAFE_STEP_DOWN=0.5;
+    private static final double SUPPORT_EPSILON=1.0e-4;
     record Action(String id, String claimId, String kind, double forward, double strafe,
                   double yawDegrees, double pitchDegrees, int durationMs, long expiresAtMs, String sessionId) {}
 
@@ -163,6 +166,18 @@ final class ClientActionController {
         return !check.collisionAhead()&&check.supportAhead();
     }
 
+    static boolean hasSupportBelow(Box footprint,double feetY,List<Box> worldShapes) {
+        for(Box shape:worldShapes)if(hasSupportBelow(footprint,feetY,shape))return true;
+        return false;
+    }
+
+    private static boolean hasSupportBelow(Box footprint,double feetY,Box shape) {
+        double drop=feetY-shape.maxY;
+        return drop>=-SUPPORT_EPSILON&&drop<=MAX_SAFE_STEP_DOWN+SUPPORT_EPSILON
+                &&shape.maxX>footprint.minX+SUPPORT_EPSILON&&shape.minX<footprint.maxX-SUPPORT_EPSILON
+                &&shape.maxZ>footprint.minZ+SUPPORT_EPSILON&&shape.minZ<footprint.maxZ-SUPPORT_EPSILON;
+    }
+
     record StepCheck(boolean collisionAhead,boolean supportAhead,boolean unknownChunk,String obstacleBlockId,Double estimatedStepUp) {
         String status(boolean onGround) {
             if(!onGround)return "not_grounded";
@@ -189,7 +204,6 @@ final class ClientActionController {
         double dx=direction.dx()*0.35;
         double dz=direction.dz()*0.35;
         Box shifted=client.player.getBoundingBox().offset(dx,0,dz);
-        Box under=new Box(shifted.minX,shifted.minY-0.12,shifted.minZ,shifted.maxX,shifted.minY,shifted.maxZ);
         int minX=net.minecraft.util.math.MathHelper.floor(shifted.minX+1.0e-7),maxX=net.minecraft.util.math.MathHelper.floor(shifted.maxX-1.0e-7);
         int minY=net.minecraft.util.math.MathHelper.floor(shifted.minY+1.0e-7),maxY=net.minecraft.util.math.MathHelper.floor(shifted.maxY-1.0e-7);
         int minZ=net.minecraft.util.math.MathHelper.floor(shifted.minZ+1.0e-7),maxZ=net.minecraft.util.math.MathHelper.floor(shifted.maxZ-1.0e-7);
@@ -197,12 +211,22 @@ final class ClientActionController {
         if(blockCount<=0||blockCount>MAX_DIAGNOSTIC_BLOCKS)return new StepCheck(true,false,true,null,null);
         for(int x=minX;x<=maxX;x++)for(int y=minY;y<=maxY;y++)for(int z=minZ;z<=maxZ;z++)
             if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null);
-        int underMinY=net.minecraft.util.math.MathHelper.floor(under.minY+1.0e-7);
-        int underMaxY=net.minecraft.util.math.MathHelper.floor(under.maxY-1.0e-7);
-        for(int x=minX;x<=maxX;x++)for(int y=underMinY;y<=underMaxY;y++)for(int z=minZ;z<=maxZ;z++)
+        int supportMinY=net.minecraft.util.math.MathHelper.floor(shifted.minY-MAX_SAFE_STEP_DOWN-SUPPORT_EPSILON);
+        int supportMaxY=net.minecraft.util.math.MathHelper.floor(shifted.minY-SUPPORT_EPSILON);
+        long supportBlockCount=(long)(maxX-minX+1)*(supportMaxY-supportMinY+1)*(maxZ-minZ+1);
+        if(supportBlockCount<=0||supportBlockCount>MAX_DIAGNOSTIC_BLOCKS)return new StepCheck(true,false,true,null,null);
+        for(int x=minX;x<=maxX;x++)for(int y=supportMinY;y<=supportMaxY;y++)for(int z=minZ;z<=maxZ;z++)
             if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null);
         boolean collision=client.world.getBlockCollisions(client.player,shifted).iterator().hasNext();
-        boolean supportAhead=client.world.getBlockCollisions(client.player,under).iterator().hasNext();
+        boolean supportAhead=false;int inspectedSupportShapes=0;
+        support: for(int x=minX;x<=maxX;x++)for(int y=supportMinY;y<=supportMaxY;y++)for(int z=minZ;z<=maxZ;z++){
+            BlockPos pos=new BlockPos(x,y,z);
+            VoxelShape shape=client.world.getBlockState(pos).getCollisionShape(client.world,pos,ShapeContext.of(client.player));
+            for(Box local:shape.getBoundingBoxes()){
+                if(inspectedSupportShapes++>=MAX_DIAGNOSTIC_SHAPES)return new StepCheck(collision,false,true,null,null);
+                if(hasSupportBelow(shifted,shifted.minY,local.offset(x,y,z))){supportAhead=true;break support;}
+            }
+        }
         String obstacleBlockId=null;Double estimatedStepUp=null;
         if(collision){
             double nearest=Double.POSITIVE_INFINITY;var targetCenter=shifted.getCenter();int inspectedShapes=0;
