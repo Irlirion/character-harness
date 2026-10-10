@@ -12,7 +12,8 @@ async function api(path:string,body?:unknown){
  if(!response.ok)throw new Error(`core_request_${response.status}`);
  return response.json();
 }
-const inserted=await api('/owner/events',{source_key:`codex-e2e:${eventId}`,author_id:'synthetic-test-player',text:'Север, скажи короткое приветствие для проверки голоса.'});
+const {character}=await api('/owner/status');
+const inserted=await api('/owner/events',{source_key:`codex-e2e:${eventId}`,author_id:'synthetic-test-player',text:`${character.name}, скажи короткое приветствие для проверки голоса.`});
 if(!inserted.inserted||!inserted.event_id)throw new Error('synthetic_event_not_inserted');
 const until=Date.now()+120_000;
 let reply=false;
@@ -21,7 +22,7 @@ try{
  while(Date.now()<until){
   const rows=await api('/owner/replies') as Array<{id:string;reply:string|null}>;
   reply=rows.some(r=>r.id===inserted.event_id&&typeof r.reply==='string'&&r.reply.length>0);
-  const jobs=await pool.query('SELECT state FROM speech_jobs WHERE character_id=$1 AND audience_id=$2 AND request_id=$3',[process.env.CHARACTER_ID??'sever',process.env.AUDIENCE_ID??'demo-public',`reply:${inserted.event_id}`]);
+  const jobs=await pool.query('SELECT state FROM speech_jobs WHERE character_id=$1 AND audience_id=$2 AND request_id=$3',[character.id,process.env.AUDIENCE_ID??'demo-public',`reply:${inserted.event_id}`]);
   speechState=jobs.rows[0]?.state??'missing';
   if(reply&&['completed','failed','cancelled','unknown'].includes(speechState))break;
   await new Promise(r=>setTimeout(r,1000));

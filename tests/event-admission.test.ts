@@ -10,14 +10,14 @@ test('PostgreSQL admission serializes concurrent writes, preserves replay, and c
   const schema = `admission_${randomUUID().replaceAll('-', '')}`;
   const admin = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL });
   const pool = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL, options: `-c search_path=${schema}`, max: 12 });
-  const p = { characterId: 'sever', audienceId: 'demo' };
+  const p = { characterId: 'lada', audienceId: 'demo' };
   const event = (key: string, author = 'player') => ({ source_key: key, author_id: author, text: 'hi', author_provenance: 'owner_input', author_trust: 'unverified' as const });
   try {
     await admin.query(`CREATE SCHEMA ${schema}`);
     for (const version of ['001-core', '002-speech', '003-bridge-delivery', '004-bridge-author-provenance', '005-event-admission']) {
       await pool.query(await readFile(new URL(`../migrations/${version}.sql`, import.meta.url), 'utf8'));
     }
-    await pool.query("INSERT INTO characters(id,name,persona) VALUES('sever','test','test')");
+    await pool.query("INSERT INTO characters(id,name,persona) VALUES('lada','test','test')");
     const authorBurst = await Promise.allSettled(Array.from({ length: 12 }, (_, i) => ingestEvent(pool, p, event(`burst-${i}`))));
     assert.equal(authorBurst.filter(r => r.status === 'fulfilled').length, 10);
     for (const r of authorBurst) if (r.status === 'rejected') assert.equal(r.reason.code, 'author_rate_limit');

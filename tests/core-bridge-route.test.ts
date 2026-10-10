@@ -10,7 +10,7 @@ const unused=async()=>{throw new Error('unused dependency called');};
 function harness(opts:{allowSystemChatPublicDemo?:boolean;audienceId?:string}={}){
   const ingested:{provenance:string;trust:string}[]=[];
   const app=buildApp({
-    principal:{characterId:'sever',audienceId:opts.audienceId??'demo-public'},
+    principal:{characterId:'lada',audienceId:opts.audienceId??'demo-public'},
     tokens:TOKENS,allowSystemChatPublicDemo:opts.allowSystemChatPublicDemo??true,
     deps:{
       pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},

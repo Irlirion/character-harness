@@ -2,6 +2,8 @@
 
 Статус: Docker-сборка, миграция и MCP/SQL smoke проверены; live Pi пока не проверен. См. [финальное ревью](final-review.md).
 
+Персонаж по умолчанию — Лада из `characters/Lada/personalities.yml`. Core загружает YAML напрямую, а оба engine получают прежний контракт persona. Выбор другого пакета и переход с существующей установки описаны в [персонажах](characters.md).
+
 ## Локальные проверки без зависимостей
 
 ```sh
@@ -38,7 +40,7 @@ PI_PROVIDER=your-provider PI_MODEL=your-model docker compose --profile agent up 
 Owner API принимает синтетическое социальное событие на POST /owner/events с bearer из secrets/owner_token:
 
 ```json
-{"source_key":"demo-1","author_id":"test-player","text":"Привет, Север! Мы вчера строили мост."}
+{"source_key":"demo-1","author_id":"test-player","text":"Привет, Лада! Мы вчера строили мост."}
 ```
 
 GET /owner/replies показывает сохранённый ответ. Источник является текстом участника, а не подтверждением того, что агент действительно строил мост. Персонаж не должен выдумывать участие. /owner/status показывает неготовность реальных адаптеров.

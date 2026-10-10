@@ -11,7 +11,7 @@ test('/engine/input loads prior conversation for the current scoped event and om
   const requested:{characterId:string;audienceId:string;eventId:string}[]=[];
   let next:unknown=event;
   const app=buildApp({
-    principal:{characterId:'sever',audienceId:'demo-public'},tokens,allowSystemChatPublicDemo:false,
+    principal:{characterId:'lada',audienceId:'demo-public'},tokens,allowSystemChatPublicDemo:false,
     deps:{
       pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},
       status:async()=>({paused:false,epoch:7}),search:async()=>[],remember:unused,control:unused,ingest:unused,
@@ -23,7 +23,7 @@ test('/engine/input loads prior conversation for the current scoped event and om
     const first=await app.inject({url:'/engine/input',headers:{authorization:`Bearer ${tokens.engine}`}});
     assert.equal(first.statusCode,200);
     assert.deepEqual(first.json().recent_conversation,history);
-    assert.deepEqual(requested,[{characterId:'sever',audienceId:'demo-public',eventId:'event-current'}]);
+    assert.deepEqual(requested,[{characterId:'lada',audienceId:'demo-public',eventId:'event-current'}]);
     next=null;
     const idle=await app.inject({url:'/engine/input',headers:{authorization:`Bearer ${tokens.engine}`}});
     assert.deepEqual(idle.json().recent_conversation,[]);

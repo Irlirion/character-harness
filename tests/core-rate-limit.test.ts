@@ -7,7 +7,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { coreFetch } from '../packages/domain/core-http.ts';
 
 const tokens = { owner: 'o'.repeat(64), engine: 'e'.repeat(64), audio: 'a'.repeat(64), bridge: 'b'.repeat(64) };
-const principal = { characterId: 'sever', audienceId: 'demo-public' };
+const principal = { characterId: 'lada', audienceId: 'demo-public' };
 function harness() {
   let accesses = 0;
   const unused = async () => { throw new Error('unused'); };
