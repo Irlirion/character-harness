@@ -1,9 +1,10 @@
+import { coreBaseUrl, coreFetch } from '../../packages/domain/core-http.ts';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { secret } from '../../packages/domain/secrets.ts';
 if(process.platform!=='darwin')throw new Error('Audio worker requires macOS');
-const base=process.env.CORE_URL??'http://127.0.0.1:3000';
+const base=coreBaseUrl(process.env.CORE_URL??'http://127.0.0.1:3000');
 const url=new URL(base);
 if(!['127.0.0.1','localhost','[::1]'].includes(url.hostname))throw new Error('Local core required');
 const token=secret('AUDIO_TOKEN');
@@ -16,7 +17,7 @@ const stop=()=>{stopped=true;running?.kill('SIGTERM');};
 process.once('SIGINT',stop);process.once('SIGTERM',stop);
 const wait=()=>new Promise(r=>setTimeout(r,500));
 async function api(path:string,body?:unknown){
- const r=await fetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(2000)});
+ const r=await coreFetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(2000)});
  if(!r.ok)throw new Error('core_request_failed');return r.json();
 }
 async function processAudio(command:string,args:string[],job:{id:string;claim_id:string;expires_at:string}) {

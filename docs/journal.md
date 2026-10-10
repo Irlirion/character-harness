@@ -97,3 +97,10 @@
 - Исправлен turn-fence endpoint, добавлена атомарная запись ответа вместе со speech job и короткой речевой репликой. Синтетический event прошёл реальный Codex turn и native audio worker до `completed`; это не новая проверка слышимости вторым игроком.
 - Реализован client-only Fabric bridge для 1.21.11/Fabric API 0.141.6. Он принимает адресованное сообщение с UUID из server chat context через отдельный token, возвращает локальный ответ и подтверждает его доставку. Server addon не нужен.
 - Выполнены Docker Node24 typecheck/policy/RPC/model tests, isolated auth/model check, bridge auth/UUID validation check и Fabric Gradle build. Живой игровой event ожидает перезапуска отдельного test instance и проверки игроком.
+
+## 2026-10-10 — безопасность публичного репозитория
+
+- Включены GitHub secret scanning/push protection, Dependabot, приватные security reports и расширенный CodeQL. Ветка main защищена обязательными Node/Java checks и PR; Actions закреплены SHA и используют read-only token.
+- Fastify обновлён до 5.12.5, MCP SDK — до 1.31.0. Добавлены отдельные бюджеты HTTP по ролям, атомарное ограничение очереди PostgreSQL до 100 событий на персонажа и до 10 новых событий автора за минуту. Дубликаты сохраняют прежний результат без нового допуска.
+- Клиенты core допускают только loopback HTTP или Compose core:3000 и отказываются от HTTP redirects. Создание bridge secret выполняется атомарно без предварительного access.
+- Добавлены regression-тесты rate limiting, адресов/redirects, MCP roundtrip и конкурентного допуска в настоящей PostgreSQL; CI запускает отдельный тестовый PostgreSQL. Миграция 005 добавляет индексы. Параметры и ограничения описаны в SECURITY.md.

@@ -1,13 +1,14 @@
+import { coreBaseUrl, coreFetch } from '../packages/domain/core-http.ts';
 import { randomUUID } from 'node:crypto';
 import { secret } from '../packages/domain/secrets.ts';
 import { pool } from '../packages/storage/db.ts';
 
-const base=process.env.CORE_URL??'http://127.0.0.1:3000';
+const base=coreBaseUrl(process.env.CORE_URL??'http://127.0.0.1:3000');
 const eventId=randomUUID();
 const ownerToken=secret('OWNER_TOKEN');
 const headers={Authorization:`Bearer ${ownerToken}`,'Content-Type':'application/json'};
 async function api(path:string,body?:unknown){
- const response=await fetch(base+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000)});
+ const response=await coreFetch(base+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000)});
  if(!response.ok)throw new Error(`core_request_${response.status}`);
  return response.json();
 }

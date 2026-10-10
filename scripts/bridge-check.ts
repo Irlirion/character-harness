@@ -1,10 +1,11 @@
+import { coreBaseUrl, coreFetch } from '../packages/domain/core-http.ts';
 import { readFile } from 'node:fs/promises';
 
-const base=process.env.CORE_URL??'http://127.0.0.1:3000';
+const base=coreBaseUrl(process.env.CORE_URL??'http://127.0.0.1:3000');
 const bridge=(await readFile(process.env.BRIDGE_TOKEN_FILE??'secrets/bridge_token','utf8')).trim();
 const engine=(await readFile(process.env.ENGINE_TOKEN_FILE??'secrets/engine_token','utf8')).trim();
 async function call(token:string,path:string,method='GET',body?:unknown){
- return fetch(base+path,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000)});
+ return coreFetch(base+path,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000)});
 }
 const denied=await call(engine,'/bridge/replies');
 const allowed=await call(bridge,'/bridge/replies');

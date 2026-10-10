@@ -22,6 +22,7 @@
 
 ## Документация
 
+- [Безопасность и ограничения нагрузки](SECURITY.md)
 - [Требования и границы](docs/requirements.md)
 - [Постоянные агенты по образцу Dots](docs/persistent-agents.md)
 - [Архитектура](docs/architecture.md)

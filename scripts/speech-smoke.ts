@@ -1,12 +1,13 @@
+import { coreBaseUrl, coreFetch } from '../packages/domain/core-http.ts';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { pool } from '../packages/storage/db.ts';
-const base=process.env.CORE_URL??'http://127.0.0.1:3000';
+const base=coreBaseUrl(process.env.CORE_URL??'http://127.0.0.1:3000');
 const owner=(await readFile(process.env.OWNER_TOKEN_FILE??'secrets/owner_token','utf8')).trim();
 const audio=(await readFile(process.env.AUDIO_TOKEN_FILE??'secrets/audio_token','utf8')).trim();
 async function req(path:string,token:string,body?:unknown,expected=200){
- const r=await fetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+ const r=await coreFetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
  assert.equal(r.status,expected,path);return r.json();
 }
 await req('/owner/resume',owner,{});

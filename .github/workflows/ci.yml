@@ -18,6 +18,19 @@ jobs:
     name: Node checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_USER: harness_test
+          POSTGRES_PASSWORD: test_only
+          POSTGRES_DB: harness_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U harness_test -d harness_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://harness_test:test_only@127.0.0.1:5432/harness_test
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
