@@ -50,6 +50,17 @@ class StepCheckTest {
         assertFalse(ClientActionController.hasSupportBelow(footprint,67.5,List.of()));
     }
 
+    @Test void allowsNineSixteenthsOntoDirtPathButRejectsFurtherDrops() {
+        Box footprint=new Box(0.2,67.5,0.2,0.8,69.3,0.8);
+        List<Box> dirtPath=worldBoxes(VoxelShapes.cuboid(0,0,0,1,15.0/16.0,1),0,66,0);
+        List<Box> lowerShape=worldBoxes(VoxelShapes.cuboid(0,0,0,1,15.0/16.0-0.001,1),0,66,0);
+
+        assertTrue(ClientActionController.hasSupportBelow(footprint,67.5,dirtPath));
+        assertEquals(0.5625,ClientActionController.nearestSupportDrop(footprint,67.5,dirtPath));
+        assertFalse(ClientActionController.hasSupportBelow(footprint,67.5,lowerShape));
+        assertFalse(ClientActionController.hasSupportBelow(footprint,67.5,List.of()));
+    }
+
     @Test void reportsNearestLowerSupportWithoutChangingSafeStepAcceptance() {
         Box footprint=new Box(0.2,67.5,0.2,0.8,69.3,0.8);
         List<Box> halfBlockDown=worldBoxes(VoxelShapes.fullCube(),0,66,0);

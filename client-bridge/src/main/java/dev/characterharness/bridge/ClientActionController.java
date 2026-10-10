@@ -17,7 +17,8 @@ import java.util.Objects;
 final class ClientActionController {
     private static final int MAX_DIAGNOSTIC_BLOCKS=12;
     private static final int MAX_DIAGNOSTIC_SHAPES=64;
-    private static final double MAX_SAFE_STEP_DOWN=0.5;
+    // Minecraft dirt paths have a 15/16-block collision height; from a half-block tread this descent is 9/16.
+    private static final double MAX_SAFE_STEP_DOWN=0.5+1.0/16.0;
     private static final double MAX_SUPPORT_DIAGNOSTIC_DEPTH=1.5;
     private static final double SUPPORT_EPSILON=1.0e-4;
     record Action(String id, String claimId, String kind, double forward, double strafe,

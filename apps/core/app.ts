@@ -209,7 +209,7 @@ function gateway() {
   const server = new McpServer({ name: 'character-harness', version: '0.1.0' });
   const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }] });
   server.registerTool('agent_get_status', { description: 'Read current character status', inputSchema: {} }, async () => result(await status(principal)));
-  server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map. nearest_support_block_id/drop are diagnostic only; walking still requires support_ahead=true, which only accepts support within 0.5 blocks.',inputSchema:{}},async()=>result(await currentWorldObservation()));
+  server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map. nearest_support_block_id/drop are diagnostic only; walking still requires support_ahead=true, which accepts support within 9/16 of a block.',inputSchema:{}},async()=>result(await currentWorldObservation()));
   server.registerTool('memory_search', { description: 'Search only the current character and audience memory', inputSchema: { query: z.string().max(200).default('') } }, async ({ query }) => result(await search(principal, query)));
   server.registerTool('memory_propose', {
     description: 'Save a personal, unverified note for this audience; do not save secrets or treat guesses as facts',
