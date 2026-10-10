@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { matchesToken, snapshot, assertActive, assertReplay } from '../packages/domain/policy.ts';
-const p = { characterId: 'sever', audienceId: 'public' };
+const p = { characterId: 'lada', audienceId: 'public' };
 test('private and other-character memories are excluded from public snapshot', () => {
   const records = [
     { ...p, id: '1', text: 'public event', source: 'world', createdAt: '' },

@@ -12,13 +12,13 @@ test('recent conversation query stays within the current character and audience,
   let sql='';let values:unknown[]=[];
   const rows=[turn('old','old input','old reply')];
   const result=await loadRecentConversation(async(query,params)=>{sql=query;values=params;return {rows};},
-    {characterId:'sever',audienceId:'demo-public'},'current-event-id');
+    {characterId:'lada',audienceId:'demo-public'},'current-event-id');
   assert.match(sql,/current_event\.character_id=\$1 AND current_event\.audience_id=\$2/);
   assert.match(sql,/e\.character_id=\$1 AND e\.audience_id=\$2 AND e\.processed=true/);
   assert.match(sql,/JOIN replies r ON r\.event_id=e\.id/);
   assert.match(sql,/\(e\.created_at,e\.id\) < \(current_event\.created_at,current_event\.id\)/);
   assert.match(sql,/ORDER BY e\.created_at DESC,e\.id DESC LIMIT 10/);
-  assert.deepEqual(values,['sever','demo-public','current-event-id']);
+  assert.deepEqual(values,['lada','demo-public','current-event-id']);
   assert.deepEqual(result,rows);
 });
 
