@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
+import type { WorldObservation } from '../packages/domain/world-observation.ts';
 
 test('PostgreSQL client actions enforce replay, leases, observation scope, and action fences',
   { skip: !process.env.TEST_DATABASE_URL }, async () => {
@@ -11,7 +12,9 @@ test('PostgreSQL client actions enforce replay, leases, observation scope, and a
   let storagePool: pg.Pool | undefined;
   try {
     await admin.query(`CREATE SCHEMA ${schema}`);
-    process.env.DATABASE_URL = `${process.env.TEST_DATABASE_URL}?options=${encodeURIComponent(`-c search_path=${schema}`)}`;
+    const databaseUrl = new URL(process.env.TEST_DATABASE_URL!);
+    databaseUrl.searchParams.set('options', `-c search_path=${schema}`);
+    process.env.DATABASE_URL = databaseUrl.toString();
     const [{ pool }, actions, observations] = await Promise.all([
       import('../packages/storage/db.ts'), import('../packages/storage/actions.ts'), import('../packages/storage/observations.ts'),
     ]);
@@ -24,8 +27,14 @@ test('PostgreSQL client actions enforce replay, leases, observation scope, and a
     const session = randomUUID();
     let observedAt = Date.now();
     const timestamp = () => new Date(observedAt += 1000).toISOString();
-    const observe = (server = 'mc.agicraft.ru:25565', connected = true, sessionId = session) =>
-      observations.saveWorldObservation(p, { session_id: sessionId, connected, server, observed_at: timestamp(), dimension: 'minecraft:overworld', position: { x: 1, y: 64, z: 2 } } as never);
+    const observe = (sessionId = session) => {
+      const snapshot: WorldObservation = {
+        session_id: sessionId, connected: true, server: 'mc.agicraft.ru:25565', observed_at: timestamp(),
+        self: { x: 1, y: 64, z: 2, yaw: 0, pitch: 0, vx: 0, vy: 0, vz: 0, on_ground: true, health: 20, dimension: 'minecraft:overworld', collision_ahead: false, support_ahead: true },
+        players: [], crosshair: { type: 'none' },
+      };
+      return observations.saveWorldObservation(p, snapshot);
+    };
     await storagePool.query("INSERT INTO characters(id,name,persona,lease_until) VALUES('lada','Лада','test',now()+interval '2 minutes')");
     await observe();
     const epoch = (await storagePool.query("SELECT epoch FROM characters WHERE id='lada'")).rows[0].epoch;
@@ -47,13 +56,13 @@ test('PostgreSQL client actions enforce replay, leases, observation scope, and a
     await storagePool.query("UPDATE world_observations SET received_at=now()-interval '3 seconds' WHERE character_id='lada'");
     await assert.rejects(actions.enqueueClientAction(p, 'stale-observation', 'walk', { forward: 1 }, 100, epoch), { code: 'world_observation_stale' });
     await observe();
-    await observe('another.example:25565');
+    await storagePool.query("UPDATE world_observations SET server='another.example:25565' WHERE character_id='lada'");
     await assert.rejects(actions.enqueueClientAction(p, 'wrong-server', 'walk', { forward: 1 }, 500, epoch), { code: 'world_observation_stale' });
     await observe();
     const wrongServer = await actions.enqueueClientAction(p, 'finish-wrong-server', 'walk', { forward: 1 }, 500, epoch);
     const wrongServerClaim = await actions.claimClientAction(p);
     assert.equal(wrongServerClaim?.id, wrongServer.id);
-    await observe('another.example:25565');
+    await storagePool.query("UPDATE world_observations SET server='another.example:25565' WHERE character_id='lada'");
     assert.equal((await actions.clientActionLease(p, wrongServer.id, wrongServerClaim!.claim_id!)).valid, false);
     assert.equal((await actions.clientActionStatus(p, wrongServer.id)).allowed, false);
     assert.deepEqual(await actions.finishClientAction(p, wrongServer.id, wrongServerClaim!.claim_id!, 'completed', {}), { state: 'cancelled' });
@@ -62,7 +71,7 @@ test('PostgreSQL client actions enforce replay, leases, observation scope, and a
     const sessionFenced = await actions.enqueueClientAction(p, 'session-fence', 'walk', { forward: 1 }, 500, epoch);
     const sessionClaim = await actions.claimClientAction(p);
     assert.equal(sessionClaim?.id, sessionFenced.id);
-    await observe('mc.agicraft.ru:25565', true, randomUUID());
+    await observe(randomUUID());
     assert.equal((await actions.clientActionLease(p, sessionFenced.id, sessionClaim!.claim_id!)).valid, false);
     assert.deepEqual(await actions.finishClientAction(p, sessionFenced.id, sessionClaim!.claim_id!, 'completed', {}), { state: 'cancelled' });
 
