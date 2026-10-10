@@ -16,17 +16,17 @@
     "smoke": "node --experimental-strip-types scripts/smoke.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@earendil-works/pi-coding-agent": "1.0.4",
     "@fastify/rate-limit": "10.3.0",
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@openai/codex": "0.160.0",
     "fastify": "5.12.5",
-    "pg": "8.16.3",
+    "pg": "8.23.1",
     "zod": "4.1.13"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
-    "@types/pg": "8.15.6",
+    "@types/pg": "8.23.1",
     "typescript": "5.9.3"
   }
 }
