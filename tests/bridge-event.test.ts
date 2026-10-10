@@ -13,7 +13,8 @@ const systemEvent = {
 test('system display-name author is explicitly unverified and admitted only to opted-in public demo', () => {
   assert.deepEqual(parseBridgeEvent(systemEvent, true, 'demo-public'), {
     ...systemEvent,
-    author_trust: 'unverified'
+    author_trust: 'unverified',
+    author_metadata: {}
   });
   assert.throws(() => parseBridgeEvent(systemEvent, false, 'demo-public'), BridgeEventScopeError);
   assert.throws(() => parseBridgeEvent(systemEvent, true, 'private'), BridgeEventScopeError);

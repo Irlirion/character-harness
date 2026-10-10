@@ -26,6 +26,13 @@ character_name=Лада
 token_file=/absolute/path/to/character-harness/secrets/bridge_token
 system_chat_enabled=false
 system_chat_server=mc.agicraft.ru:25565
+actions_enabled=false
+observation_enabled=false
+action_server=mc.agicraft.ru:25565
+stt_enabled=false
+voice_server=mc.agicraft.ru:25565
+stt_url=http://127.0.0.1:3082
+stt_token_file=/absolute/path/to/character-harness/secrets/stt_token
 ```
 
 Lada is the default for new configurations. For an existing installation, change `character_name` to `Лада` and restart the client; the bridge preserves existing properties files. This changes addressed chat, not the Minecraft account nickname.
@@ -42,4 +49,16 @@ On the signed chat path the bridge sends the UUID provided with the server chat 
 
 Replies are displayed locally and acknowledged to core after display. If the client closes between display and acknowledgement, a reply may be shown again after reconnect. Voice is emitted by the existing SVC client/audio path; this mod does not manipulate the microphone or alter SVC settings.
 
-Current verification covers compilation against the declared Fabric versions, the synthetic core → Codex → speech queue cycle, and a live addressed player message observed reaching core as an unverified `minecraft_system_chat` event. A live player message has not yet completed the whole cycle through to a spoken reply: the ChatGPT plan limit was exhausted at the time.
+## Read-only awareness, movement, and incoming voice
+
+These features are disabled by default and are pinned to `mc.agicraft.ru:25565`. Core also requires the separate `BRIDGE_CLIENT_WORLD_ENABLED=true` opt-in before it accepts observations or exposes movement to the client; this setting defaults to false. Set `observation_enabled=true` before enabling either `actions_enabled` or `stt_enabled`; the config loader rejects action/STT without observation. Core action authorization also requires a fresh observation and the active character epoch. Keep the matching core audience limited to the opted-in public demo.
+
+The client publishes one compact local snapshot per second: its own position, yaw/pitch, velocity, health, dimension and a one-step collision/support check; at most eight loaded players within 16 blocks that pass a block raycast; and the current crosshair target. Player UUIDs and names are local server-provided observations, not externally verified identity. No chunk scan or world map is sent. Snapshots expire after 2.5 seconds, and a reconnect changes the client session ID.
+
+`agent_walk` uses `forward` and `strafe` values of -1, 0, or 1 (back/forward and left/right, with diagonals allowed) for 100–1200 ms. It starts only while grounded and checks the body's destination path plus actual loaded collision-shape support. A controlled descent may briefly be airborne only while descending toward confirmed support within the lower of the player's effective `SAFE_FALL_DISTANCE` (default 3 blocks) and the bridge cap of 3 blocks. The fall budget resets at each grounded tick, allowing a normal sequence down stairs. Air starts, upward movement, flying, missing support, collisions, unknown chunks, and deeper drops are rejected or cancelled; expiry in mid-descent is never reported as completion. `agent_turn` changes yaw by at most 90 degrees and pitch by at most 30. Core fences jobs by character, audience, invocation, epoch, observation session, lease and deadline. The client rechecks the lease, session, screen and movement safety each tick and releases movement keys on completion, cancellation, disconnect or shutdown. Snapshots and failed walk evidence can include `step_status`, a nearby colliding block ID, a bounded estimated step height, and the nearest collision support block/drop within a bounded 3-block diagnostic window. Support scans inspect only already-loaded positions and never load chunks. Completion reports local position/rotation evidence; it does not claim server acknowledgement or pathfinding.
+
+For background actions in the test client, keep the world open and close any inventory, pause menu, or other screen. If the game pauses when unfocused, press F3+P in the test instance to toggle “Pause on Lost Focus” off. The bridge reports an open screen as `screen_opened` and never dismisses or bypasses menus.
+
+Incoming Simple Voice Chat transcription uses the client API's remote entity audio event, sender UUID, and 48 kHz mono PCM16 frames. The bridge keeps at most 200 ms of pre-roll, closes a segment after 700 ms of silence while retaining at most 150 ms of tail, and caps each utterance at eight seconds. It ignores own-player and whisper frames. It posts bounded PCM over authenticated loopback HTTP to the resident STT service; the dedicated token is read from `stt_token_file`. The request has a 20-second timeout and the JSON response is capped at 4 KiB. PCM buffers are cleared after processing, and the service does not retain audio. It accepts only transcripts beginning with the character wake name `Лада`; it does not continuously forward ambient conversation. Set `stt_enabled=true` only for the test server after provisioning its separate service token; the config loader rejects `stt_enabled=true` without `stt_token_file`. The resulting author is namespaced as an unverified SVC sender; a matching visible player record is attached as observation metadata without cross-channel identity linking.
+
+The new observation, movement, and STT paths have offline schema/DB-smoke and Fabric unit/build checks. They have not been exercised in a live game, and no live movement, model inference, or microphone speech was sent during implementation. Restart only the separate test instance to load an updated jar; the primary Minecraft instance is not part of this setup.

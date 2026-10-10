@@ -5,7 +5,7 @@ try {
   await db.query('BEGIN');
   await db.query('SELECT pg_advisory_xact_lock(420041)');
   await db.query('CREATE TABLE IF NOT EXISTS schema_migrations(version text PRIMARY KEY, applied_at timestamptz DEFAULT now())');
-  for (const version of ['001-core', '002-speech', '003-bridge-delivery', '004-bridge-author-provenance', '005-event-admission']) {
+  for (const version of ['001-core', '002-speech', '003-bridge-delivery', '004-bridge-author-provenance', '005-event-admission', '005-client-actions', '006-voice-stt-provenance']) {
     if (!(await db.query('SELECT 1 FROM schema_migrations WHERE version=$1', [version])).rowCount) {
       await db.query(await readFile(new URL(`../../migrations/${version}.sql`, import.meta.url), 'utf8'));
       await db.query('INSERT INTO schema_migrations(version) VALUES($1)', [version]);

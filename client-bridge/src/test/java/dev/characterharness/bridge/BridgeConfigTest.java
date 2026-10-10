@@ -15,6 +15,16 @@ class BridgeConfigTest {
     }
 
     @Test
+    void sttServiceUrlUsesTheSameStrictLoopbackBoundary() throws Exception {
+        assertEquals("http://127.0.0.1:3082", BridgeConfig.normalizeSttUrl("http://127.0.0.1:3082/"));
+        assertEquals("http://localhost:3082", BridgeConfig.normalizeSttUrl("http://LOCALHOST:3082"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSttUrl("http://127.0.0.1:3082@attacker.example"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSttUrl("http://user@127.0.0.1:3082"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSttUrl("https://127.0.0.1:3082"));
+        assertThrows(IOException.class, () -> BridgeConfig.normalizeSttUrl("http://127.0.0.1:3082/api"));
+    }
+
+    @Test
     void rejectsUserInfoHostConfusionAndUnexpectedUrlParts() {
         assertRejected("http://127.0.0.1:3000@attacker.example");
         assertRejected("http://user@127.0.0.1:3000");
@@ -35,6 +45,15 @@ class BridgeConfigTest {
         assertThrows(IOException.class, () -> BridgeConfig.normalizeSystemChatServer("mc.agicraft.ru:25566"));
         assertThrows(IOException.class, () -> BridgeConfig.normalizeSystemChatServer("mc.agicraft.ru:25565@attacker.example"));
         assertThrows(IOException.class, () -> BridgeConfig.normalizeSystemChatServer("attacker.example:25565"));
+    }
+
+    @Test
+    void actionsAndVoiceRequireWorldObservationOptIn() throws Exception {
+        BridgeConfig.validateFeatureGates(false, false, false);
+        BridgeConfig.validateFeatureGates(true, true, false);
+        BridgeConfig.validateFeatureGates(false, true, true);
+        assertThrows(IOException.class, () -> BridgeConfig.validateFeatureGates(true, false, false));
+        assertThrows(IOException.class, () -> BridgeConfig.validateFeatureGates(false, false, true));
     }
 
     private static void assertRejected(String value) {

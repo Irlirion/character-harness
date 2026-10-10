@@ -7,6 +7,9 @@
 - Defaults Compose и Fabric bridge переведены на Ладу, пакет `sever.json` удалён. Память прежней identity не переносится и не удаляется автоматически.
 - Изменения подготовлены поверх актуальной main, сохранив ранее принятые ограничения трафика, проверки origin/token и обновления зависимостей.
 - Прошли Docker frozen-lockfile build/typecheck (55 тестов без БД), отдельный PostgreSQL admission test, isolated Lada startup/identity isolation и MCP/SQL smoke; Fabric Gradle build/test также завершён успешно. Рабочие контейнеры и credentials не менялись.
+- Voice/STT documentation and smoke defaults now address Лада. The two-player Minecraft check remains manual; its checklist covers addressing/reply, echo suppression, and movement fences.
+- The PR also brings back the client movement/action queue, world observations, STT attribution, and current main admission and request-fencing changes. PostgreSQL integration now exercises action replay/conflict, lease/epoch/pause/session/freshness/server/audience/budget fences; it exposed and fixed inconsistent replay timestamp serialization and missing server checks on status/lease/finish.
+- Verification for the PR includes Node typecheck and tests, PostgreSQL action/admission integration, STT/TTS Python tests, STT Docker service tests, and Fabric Gradle build/tests. Live two-player voice and movement remain unverified.
 
 ## 2026-10-03
 

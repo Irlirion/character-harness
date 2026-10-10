@@ -9,14 +9,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
-record BridgeConfig(String coreUrl, String token, String characterName, boolean systemChatEnabled, String systemChatServer) {
+record BridgeConfig(String coreUrl, String token, String characterName, boolean systemChatEnabled, String systemChatServer,
+                    boolean actionsEnabled, boolean observationEnabled, String actionServer, boolean sttEnabled, String voiceServer,
+                    String sttUrl, String sttToken) {
     static final String SYSTEM_CHAT_SERVER = "mc.agicraft.ru:25565";
 
     static BridgeConfig load() throws IOException {
         Path path = FabricLoader.getInstance().getConfigDir().resolve("character-harness-bridge.properties");
         if (Files.notExists(path)) {
             Files.createDirectories(path.getParent());
-            Files.writeString(path, "core_url=http://127.0.0.1:3000\ncharacter_name=Лада\ntoken_file=\nsystem_chat_enabled=false\nsystem_chat_server=mc.agicraft.ru:25565\n");
+            Files.writeString(path, "core_url=http://127.0.0.1:3000\ncharacter_name=Лада\ntoken_file=\nsystem_chat_enabled=false\nsystem_chat_server=mc.agicraft.ru:25565\nactions_enabled=false\nobservation_enabled=false\naction_server=mc.agicraft.ru:25565\nstt_enabled=false\nvoice_server=mc.agicraft.ru:25565\nstt_url=http://127.0.0.1:3082\nstt_token_file=\n");
         }
         Properties properties = new Properties();
         try (var reader = Files.newBufferedReader(path)) { properties.load(reader); }
@@ -32,15 +34,48 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
         if (!enabledValue.equalsIgnoreCase("true") && !enabledValue.equalsIgnoreCase("false")) throw new IOException("system_chat_enabled must be true or false");
         boolean systemChatEnabled = Boolean.parseBoolean(enabledValue);
         String systemChatServer = normalizeSystemChatServer(properties.getProperty("system_chat_server", SYSTEM_CHAT_SERVER).trim());
-        return new BridgeConfig(coreUrl, token, characterName, systemChatEnabled, systemChatServer);
+        boolean actionsEnabled = strictBoolean(properties.getProperty("actions_enabled", "false"), "actions_enabled");
+        boolean observationEnabled = strictBoolean(properties.getProperty("observation_enabled", "false"), "observation_enabled");
+        boolean sttEnabled = strictBoolean(properties.getProperty("stt_enabled", "false"), "stt_enabled");
+        validateFeatureGates(actionsEnabled, observationEnabled, sttEnabled);
+        String actionServer = normalizeSystemChatServer(properties.getProperty("action_server", SYSTEM_CHAT_SERVER).trim());
+        String voiceServer = normalizeSystemChatServer(properties.getProperty("voice_server", SYSTEM_CHAT_SERVER).trim());
+        String sttUrl = normalizeSttUrl(properties.getProperty("stt_url", "http://127.0.0.1:3082").trim());
+        String sttToken = "";
+        if (sttEnabled) {
+            String sttTokenPath = properties.getProperty("stt_token_file", "").trim();
+            if (sttTokenPath.isEmpty()) throw new IOException("Set stt_token_file when STT is enabled (stt_provider was removed; the service is the only provider)");
+            sttToken = Files.readString(Path.of(sttTokenPath).toAbsolutePath().normalize()).trim();
+            if (sttToken.length() < 32) throw new IOException("STT service token file is invalid");
+        }
+        return new BridgeConfig(coreUrl, token, characterName, systemChatEnabled, systemChatServer, actionsEnabled, observationEnabled, actionServer, sttEnabled, voiceServer, sttUrl, sttToken);
+    }
+
+    private static boolean strictBoolean(String value, String property) throws IOException {
+        if (!value.equalsIgnoreCase("true") && !value.equalsIgnoreCase("false")) throw new IOException(property + " must be true or false");
+        return Boolean.parseBoolean(value);
+    }
+
+    static void validateFeatureGates(boolean actionsEnabled, boolean observationEnabled, boolean sttEnabled) throws IOException {
+        if ((actionsEnabled || sttEnabled) && !observationEnabled) {
+            throw new IOException("observation_enabled must be true when actions_enabled or stt_enabled is true");
+        }
     }
 
     static String normalizeCoreUrl(String value) throws IOException {
+        return normalizeLoopbackUrl(value, "core_url");
+    }
+
+    static String normalizeSttUrl(String value) throws IOException {
+        return normalizeLoopbackUrl(value, "stt_url");
+    }
+
+    private static String normalizeLoopbackUrl(String value, String property) throws IOException {
         final URI uri;
         try {
             uri = new URI(value);
         } catch (URISyntaxException error) {
-            throw new IOException("core_url must be a valid loopback HTTP URL", error);
+            throw new IOException(property + " must be a valid loopback HTTP URL", error);
         }
         String host = uri.getHost();
         int port = uri.getPort();
@@ -52,7 +87,7 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
                 || uri.getRawQuery() != null
                 || uri.getRawFragment() != null
                 || !(path == null || path.isEmpty() || "/".equals(path))) {
-            throw new IOException("core_url must be loopback HTTP with a valid port and no credentials, path, query, or fragment");
+            throw new IOException(property + " must be loopback HTTP with a valid port and no credentials, path, query, or fragment");
         }
         return "http://" + host.toLowerCase(java.util.Locale.ROOT) + ":" + port;
     }

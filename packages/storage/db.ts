@@ -62,7 +62,7 @@ export async function nextEvent(p: Principal) {
     if (!state || state.paused || (state.lease_until && new Date(state.lease_until).getTime() > Date.now())) {
       await db.query('COMMIT'); return null;
     }
-    const event = (await db.query(`SELECT id,author_id,author_provenance,author_trust,text,reply_to FROM social_events
+    const event = (await db.query(`SELECT id,author_id,author_provenance,author_trust,author_metadata,text,reply_to FROM social_events
       WHERE character_id=$1 AND audience_id=$2 AND NOT processed AND attempts<3 ORDER BY created_at,id LIMIT 1`,
       [p.characterId,p.audienceId])).rows[0];
     if (event) {
