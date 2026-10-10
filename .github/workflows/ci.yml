@@ -69,4 +69,8 @@ jobs:
         with:
           persist-credentials: false
       - run: docker build --file Dockerfile.stt --target service-tests .
-      - run: python3 apps/tts-service/test_main.py
+      - name: TTS HTTP and WAV contracts (no model download)
+        run: |
+          python3 -m venv /tmp/tts-contracts
+          /tmp/tts-contracts/bin/python -m pip install numpy==2.5.3
+          /tmp/tts-contracts/bin/python -m unittest discover -s apps/tts-service -p 'test_*.py'

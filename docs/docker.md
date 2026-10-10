@@ -1,6 +1,6 @@
 # Запуск в Docker
 
-Дата обновления: 2026-10-04. Статус: Docker core/PostgreSQL, Pi profile и Codex profile собираются на Node 24; Codex использует отдельный ChatGPT device login и `gpt-6-luna`. На Mac вне Docker работают native Minecraft Fabric client и audio worker. Telegram и Docker-only Minecraft client не реализованы.
+Дата обновления: 2026-10-10. Статус: Docker core/PostgreSQL, Pi profile и Codex profile собираются на Node 24; Codex использует отдельный ChatGPT device login. На Mac вне Docker работают native Minecraft Fabric client, Qwen3-TTS на MLX и audio worker. Telegram и Docker-only Minecraft client не реализованы. TTS не входит в Compose: запуск модели требует Apple Silicon и нативного macOS MLX.
 
 ## Базовая топология
 
@@ -11,6 +11,7 @@
 - migrate: одноразовый запуск того же образа приложения для миграций БД.
 - Minecraft: native Fabric client-only bridge в отдельном Prism test instance, отдельный bridge token, без server addon.
 - Audio: native Node/Swift worker на Mac, Loopback и клиентский SVC.
+- TTS: native macOS Python/MLX service на `127.0.0.1:3081`; модель прогревается до readiness. Piper и отдельный TTS Docker image больше не входят в runtime.
 
 Для Docker core и engines Node.js на хосте не нужен. На Mac native audio worker требует Node 24 и Swift toolchain; native game client управляется через PrismLauncher. Первый игровой срез использует Codex subscription через собственный device login.
 

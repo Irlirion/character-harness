@@ -2,7 +2,7 @@
 
 Харнес для автономных персонажей, которые действуют в Minecraft, Telegram и других средах, сохраняют память и расширяют свои возможности.
 
-Статус 2026-10-04: Docker core/MCP/PostgreSQL и native audio worker проверены; Codex изолированно вошёл через ChatGPT подписку; authenticated `model/list` подтвердил закреплённую `gpt-6-luna`; синтетическое событие прошло Codex→reply→completed speech job. Client-only Fabric bridge собран и добавлен в отдельный Prism test instance. Для игровых сообщений через SYSTEM/GAME предусмотрен отдельный opt-in adapter только для `mc.agicraft.ru:25565` и `demo-public`; никнейм сохраняется как недоверенная личность. Живое адресованное сообщение игрока доставлено bridge в core и принято как `minecraft_system_chat` для `demo-public`; полный цикл от живого сообщения до озвученного ответа не завершён, потому что лимит подписки ChatGPT был исчерпан. Server addon не нужен.
+Статус 2026-10-10: Docker core/MCP/PostgreSQL и Codex engine проверены; Qwen3-TTS 0.6B CustomVoice 8bit на MLX и audio worker работают нативно на Mac. Пользователь подтвердил слышимость автоматической речи через Loopback и Simple Voice Chat. Это подтверждает аудио-путь, но не полный игровой LLM-цикл. Текущая установка описана в [инструкции audio worker](docs/audio-worker.md). Client-only Fabric bridge собран для отдельного Prism test instance. Для игровых сообщений через SYSTEM/GAME предусмотрен opt-in adapter только для `mc.agicraft.ru:25565` и `demo-public`; никнейм остаётся недоверенной личностью. Server addon не нужен.
 
 Главная цель MVP — социальный вау-эффект для участников Minecraft-сервера и Telegram: узнаваемый персонаж с памятью, характером и уместной инициативой.
 
@@ -12,7 +12,7 @@
 
 Движок исполнения: Pi Agent или Codex через заменяемый адаптер. Выбор движка отделён от личности и памяти.
 
-Обязательный способ запуска — Docker + Compose; состояние хранится в постоянных volumes.
+Core, база и движки запускаются через Docker + Compose; состояние хранится в постоянных volumes. Компоненты, которым нужны локальное аудиооборудование или macOS MLX, работают нативно на Mac.
 
 Продуктовый ориентир — Dots: один постоянный персонаж в разных каналах, работа между разговорами, длительные обязанности и самостоятельное пробуждение.
 
@@ -36,7 +36,6 @@
 - [Движки Pi Agent и Codex](docs/engines.md)
 - [Codex runtime и вход через подписку](docs/codex-engine.md)
 - [Fabric client bridge](client-bridge/README.md)
-- [Codex runtime и вход через подписку](docs/codex-engine.md)
 - [Персонажи и адаптация](docs/characters.md)
 - [Персоналия Лады](characters/Lada/personalities.yml)
 - [Память и контекст](docs/memory-context.md)

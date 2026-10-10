@@ -93,34 +93,6 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: "no"
-  tts:
-    build:
-      context: .
-      dockerfile: Dockerfile.tts
-    profiles: [tts]
-    environment:
-      TTS_TOKEN_FILE: /run/secrets/tts_token
-      PIPER_MODEL: ${PIPER_MODEL:-/models/ru_RU-irina-medium.onnx}
-      TTS_HOST: 0.0.0.0
-      TTS_PORT: 3081
-    secrets: [tts_token]
-    volumes:
-      - ${PIPER_MODEL_DIR:-./work/tts-models}:/models:ro
-    networks: [tts_internal]
-    ports: ['127.0.0.1:3081:3081']
-    init: true
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: 768m
-    cpus: 2.0
-    healthcheck:
-      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:3081/ready", timeout=1).read()']
-      interval: 5s
-      timeout: 2s
-      retries: 20
-    restart: unless-stopped
   stt:
     build:
       context: .
@@ -155,7 +127,6 @@ services:
 networks:
   storage: {internal: true}
   agent: {}
-  tts_internal: {}
   stt_internal: {}
 volumes:
   postgres_data:
@@ -169,5 +140,4 @@ secrets:
   model_api_key: {file: ./secrets/model_api_key}
   audio_token: {file: ./secrets/audio_token}
   bridge_token: {file: ./secrets/bridge_token}
-  tts_token: {file: ./secrets/tts_token}
   stt_token: {file: ./secrets/stt_token}

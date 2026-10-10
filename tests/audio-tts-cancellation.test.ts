@@ -36,7 +36,8 @@ async function waitFor(check: () => boolean, timeoutMs = 6000) {
   }
 }
 
-test('permission revocation aborts in-flight Piper fetch before player starts', {
+for (const provider of ['qwen']) {
+test(`permission revocation aborts in-flight ${provider} fetch before player starts`, {
   skip: process.platform !== 'darwin' && 'native audio worker is macOS-only',
 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'audio-tts-cancel-'));
@@ -115,7 +116,7 @@ test('permission revocation aborts in-flight Piper fetch before player starts', 
         ...process.env,
         CORE_URL: `http://127.0.0.1:${corePort}`,
         AUDIO_TOKEN_FILE: tokenPath,
-        TTS_PROVIDER: 'piper',
+        TTS_PROVIDER: provider,
         TTS_URL: `http://127.0.0.1:${ttsPort}`,
         TTS_TOKEN_FILE: tokenPath,
         AUDIO_PLAYER: fakePlayer,
@@ -145,3 +146,5 @@ test('permission revocation aborts in-flight Piper fetch before player starts', 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+}
