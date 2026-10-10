@@ -125,9 +125,8 @@ async function readBoundedBody(response: Response, maxBytes: number) {
 async function synthesizePiper(file: string, job: Job, spoken: string) {
   if (!ttsToken) throw new Error('tts_token_missing');
   const controller = new AbortController();
-  const request = fetch(new URL('/synthesize', ttsUrl), {
+  const request = coreFetch(new URL('/synthesize', ttsUrl), {
     method: 'POST',
-    redirect: 'error',
     headers: { Authorization: `Bearer ${ttsToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ text: spoken }),
     signal: controller.signal,
