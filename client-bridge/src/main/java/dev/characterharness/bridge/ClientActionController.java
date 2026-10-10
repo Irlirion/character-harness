@@ -2,6 +2,7 @@ package dev.characterharness.bridge;
 
 import com.google.gson.JsonObject;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.BlockPos;
@@ -16,10 +17,10 @@ import java.util.Objects;
 
 final class ClientActionController {
     private static final int MAX_DIAGNOSTIC_BLOCKS=12;
+    private static final int MAX_SUPPORT_SCAN_BLOCKS=24;
     private static final int MAX_DIAGNOSTIC_SHAPES=64;
-    // Minecraft dirt paths have a 15/16-block collision height; from a half-block tread this descent is 9/16.
-    private static final double MAX_SAFE_STEP_DOWN=0.5+1.0/16.0;
-    private static final double MAX_SUPPORT_DIAGNOSTIC_DEPTH=1.5;
+    private static final double MAX_SAFE_FALL_DISTANCE=3.0;
+    private static final double MAX_SUPPORT_DIAGNOSTIC_DEPTH=3.0;
     private static final double SUPPORT_EPSILON=1.0e-4;
     record Action(String id, String claimId, String kind, double forward, double strafe,
                   double yawDegrees, double pitchDegrees, int durationMs, long expiresAtMs, String sessionId) {}
@@ -35,6 +36,10 @@ final class ClientActionController {
     private float targetPitch;
     private boolean turnSet;
     private volatile long lastLeaseNanos;
+    private boolean walkStartedGrounded;
+    private boolean controlledDescentActive;
+    private double descentDepartureFeetY;
+    private double actionSafeFallDistance;
 
     record Result(String state, JsonObject evidence) {}
 
@@ -61,10 +66,16 @@ final class ClientActionController {
             completion.accept(action, result("failed", "invalid_walk_bounds")); return;
         }
         if ("walk".equals(action.kind())) {
-            StepCheck step=checkStep(client,action);
-            if (!step.safe(client.player.isOnGround())) {
+            if(!client.player.isOnGround()||client.player.getAbilities().flying){
+                completion.accept(action,result("failed",client.player.getAbilities().flying?"player_flying":"unsafe_or_unsupported_step")); return;
+            }
+            actionSafeFallDistance=safeFallDistance(client.player.getAttributeValue(EntityAttributes.SAFE_FALL_DISTANCE));
+            StepCheck step=checkStep(client,action,actionSafeFallDistance);
+            if (!step.safe(true)) {
                 completion.accept(action,result("failed","unsafe_or_unsupported_step",step,client.player.isOnGround())); return;
             }
+            walkStartedGrounded=true;
+            updateGroundedDescent(client,step);
         }
         if ("turn".equals(action.kind()) && !ActionBounds.validTurn(action.yawDegrees(),action.pitchDegrees())) {
             completion.accept(action, result("failed", "invalid_turn_bounds")); return;
@@ -91,15 +102,23 @@ final class ClientActionController {
         if (client.currentScreen != null) { finish(client, action, "cancelled", "screen_opened"); return; }
         if (!currentSession.test(action.sessionId())) { finish(client,action,"cancelled","world_session_mismatch"); return; }
         if (System.nanoTime() - lastLeaseNanos > 500_000_000L) { finish(client, action, "cancelled", "action_lease_stale"); return; }
-        if (System.nanoTime() >= deadlineNanos || System.currentTimeMillis() >= action.expiresAtMs()) {
-            boolean moved = "walk".equals(action.kind()) && new Vec3d(client.player.getX(),client.player.getY(),client.player.getZ()).squaredDistanceTo(startPos) >= 0.0025;
-            finish(client, action, moved ? "completed" : "failed", moved ? null : "action_expired_or_no_movement"); return;
-        }
+        StepCheck activeStep=null;
         if ("walk".equals(action.kind())) {
-            StepCheck step=checkStep(client,action);
-            if (!step.safe(client.player.isOnGround())) {
+            if(client.player.getAbilities().flying){finish(client,action,"cancelled","player_flying");return;}
+            double currentSafeFall=safeFallDistance(client.player.getAttributeValue(EntityAttributes.SAFE_FALL_DISTANCE));
+            actionSafeFallDistance=Math.min(actionSafeFallDistance,currentSafeFall);
+            activeStep=checkStep(client,action,actionSafeFallDistance);
+            if (!walkStepSafe(client,activeStep)) {
+                StepCheck step=activeStep;
                 finish(client,action,"cancelled","step_became_unsafe",step,client.player.isOnGround()); return;
             }
+        }
+        if (System.nanoTime() >= deadlineNanos || System.currentTimeMillis() >= action.expiresAtMs()) {
+            if("walk".equals(action.kind())&&!client.player.isOnGround()){
+                finish(client,action,"cancelled","action_expired_mid_descent",activeStep,false); return;
+            }
+            boolean moved = "walk".equals(action.kind()) && new Vec3d(client.player.getX(),client.player.getY(),client.player.getZ()).squaredDistanceTo(startPos) >= 0.0025;
+            finish(client, action, moved ? "completed" : "failed", moved ? null : "action_expired_or_no_movement"); return;
         }
         if ("turn".equals(action.kind()) && !turnSet) {
             targetYaw = net.minecraft.util.math.MathHelper.wrapDegrees(startYaw + (float) action.yawDegrees());
@@ -147,7 +166,37 @@ final class ClientActionController {
         if (reason != null) evidence.addProperty("reason", reason);
         active = null;
         startPos = null;
+        walkStartedGrounded=false;controlledDescentActive=false;actionSafeFallDistance=0;
         completion.accept(action, new Result(state, evidence));
+    }
+
+    private void updateGroundedDescent(MinecraftClient client,StepCheck step){
+        descentDepartureFeetY=client.player.getY();
+        controlledDescentActive=step.nearestSupportDrop()!=null&&step.nearestSupportDrop()>SUPPORT_EPSILON;
+    }
+
+    private boolean walkStepSafe(MinecraftClient client,StepCheck step){
+        if(client.player.isOnGround()){
+            if(!step.safe(true))return false;
+            updateGroundedDescent(client,step);
+            return true;
+        }
+        return safeControlledDescent(walkStartedGrounded,controlledDescentActive,client.player.getVelocity().y,
+                descentDepartureFeetY,client.player.getY(),step,actionSafeFallDistance);
+    }
+
+    static double safeFallDistance(double attributeValue){
+        if(!Double.isFinite(attributeValue))return 0;
+        return Math.max(0,Math.min(MAX_SAFE_FALL_DISTANCE,attributeValue));
+    }
+
+    static boolean safeControlledDescent(boolean startedGrounded,boolean descentWasAdmitted,double verticalVelocityY,
+                                         double departureFeetY,double currentFeetY,StepCheck step,double safeFallDistance){
+        if(!startedGrounded||!descentWasAdmitted||verticalVelocityY>SUPPORT_EPSILON
+                ||currentFeetY>departureFeetY+SUPPORT_EPSILON||step.unknownChunk()||step.collisionAhead()
+                ||!step.supportAhead()||step.nearestSupportDrop()==null)return false;
+        double totalFall=departureFeetY-currentFeetY+step.nearestSupportDrop();
+        return totalFall>=-SUPPORT_EPSILON&&totalFall<=safeFallDistance+SUPPORT_EPSILON;
     }
 
     private static void setMovement(MinecraftClient client, Action a) {
@@ -168,15 +217,15 @@ final class ClientActionController {
         return !check.collisionAhead()&&check.supportAhead();
     }
 
-    static boolean hasSupportBelow(Box footprint,double feetY,List<Box> worldShapes) {
-        for(Box shape:worldShapes)if(hasSupportBelow(footprint,feetY,shape))return true;
+    static boolean hasSupportBelow(Box footprint,double feetY,List<Box> worldShapes,double maxDrop) {
+        for(Box shape:worldShapes)if(hasSupportBelow(footprint,feetY,shape,maxDrop))return true;
         return false;
     }
 
-    private static boolean hasSupportBelow(Box footprint,double feetY,Box shape) {
+    private static boolean hasSupportBelow(Box footprint,double feetY,Box shape,double maxDrop) {
         double drop=feetY-shape.maxY;
         return intersectsSupportFootprint(footprint,shape)
-                &&drop>=-SUPPORT_EPSILON&&drop<=MAX_SAFE_STEP_DOWN+SUPPORT_EPSILON;
+                &&drop>=-SUPPORT_EPSILON&&drop<=maxDrop+SUPPORT_EPSILON;
     }
 
     private static boolean intersectsSupportFootprint(Box footprint,Box shape) {
@@ -220,6 +269,10 @@ final class ClientActionController {
         }
     }
     static StepCheck checkStep(MinecraftClient client,Action action) {
+        return checkStep(client,action,safeFallDistance(client.player.getAttributeValue(EntityAttributes.SAFE_FALL_DISTANCE)));
+    }
+
+    static StepCheck checkStep(MinecraftClient client,Action action,double maxSafeDrop) {
         ActionBounds.Direction direction=ActionBounds.horizontal(client.player.getYaw(),action.forward(),action.strafe());
         double dx=direction.dx()*0.35;
         double dz=direction.dz()*0.35;
@@ -231,10 +284,10 @@ final class ClientActionController {
         if(blockCount<=0||blockCount>MAX_DIAGNOSTIC_BLOCKS)return new StepCheck(true,false,true,null,null,null,null);
         for(int x=minX;x<=maxX;x++)for(int y=minY;y<=maxY;y++)for(int z=minZ;z<=maxZ;z++)
             if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null,null,null);
-        int supportMinY=net.minecraft.util.math.MathHelper.floor(shifted.minY-MAX_SAFE_STEP_DOWN-SUPPORT_EPSILON);
+        int supportMinY=net.minecraft.util.math.MathHelper.floor(shifted.minY-maxSafeDrop-SUPPORT_EPSILON);
         int supportMaxY=net.minecraft.util.math.MathHelper.floor(shifted.minY-SUPPORT_EPSILON);
         long supportBlockCount=(long)(maxX-minX+1)*(supportMaxY-supportMinY+1)*(maxZ-minZ+1);
-        if(supportBlockCount<=0||supportBlockCount>MAX_DIAGNOSTIC_BLOCKS)return new StepCheck(true,false,true,null,null,null,null);
+        if(supportBlockCount<=0||supportBlockCount>MAX_SUPPORT_SCAN_BLOCKS)return new StepCheck(true,false,true,null,null,null,null);
         for(int x=minX;x<=maxX;x++)for(int y=supportMinY;y<=supportMaxY;y++)for(int z=minZ;z<=maxZ;z++)
             if(!client.world.isChunkLoaded(new BlockPos(x,y,z)))return new StepCheck(true,false,true,null,null,null,null);
         boolean collision=client.world.getBlockCollisions(client.player,shifted).iterator().hasNext();
@@ -244,14 +297,14 @@ final class ClientActionController {
             VoxelShape shape=client.world.getBlockState(pos).getCollisionShape(client.world,pos,ShapeContext.of(client.player));
             for(Box local:shape.getBoundingBoxes()){
                 if(inspectedSupportShapes++>=MAX_DIAGNOSTIC_SHAPES)return new StepCheck(collision,false,true,null,null,null,null);
-                if(hasSupportBelow(shifted,shifted.minY,local.offset(x,y,z))){supportAhead=true;break support;}
+                if(hasSupportBelow(shifted,shifted.minY,local.offset(x,y,z),maxSafeDrop)){supportAhead=true;break support;}
             }
         }
         String nearestSupportBlockId=null;Double nearestSupportDrop=null;
         int diagnosticMinY=net.minecraft.util.math.MathHelper.floor(shifted.minY-MAX_SUPPORT_DIAGNOSTIC_DEPTH-SUPPORT_EPSILON);
         int diagnosticMaxY=net.minecraft.util.math.MathHelper.floor(shifted.minY-SUPPORT_EPSILON);
         long diagnosticBlockCount=(long)(maxX-minX+1)*(diagnosticMaxY-diagnosticMinY+1)*(maxZ-minZ+1);
-        if(diagnosticBlockCount>0&&diagnosticBlockCount<=MAX_DIAGNOSTIC_BLOCKS){
+        if(diagnosticBlockCount>0&&diagnosticBlockCount<=MAX_SUPPORT_SCAN_BLOCKS){
             boolean loaded=true;
             for(int x=minX;x<=maxX&&loaded;x++)for(int y=diagnosticMinY;y<=diagnosticMaxY&&loaded;y++)for(int z=minZ;z<=maxZ;z++)
                 if(!client.world.isChunkLoaded(new BlockPos(x,y,z))){loaded=false;break;}

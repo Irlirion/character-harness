@@ -23,7 +23,7 @@ const self = z.object({
   obstacle_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),
   estimated_step_up:coordinate(0,2).optional(),
   nearest_support_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),
-  nearest_support_drop:coordinate(0,1.5).optional()
+  nearest_support_drop:coordinate(0,3).optional()
 }).strict();
 const time = z.string().refine(v=>Number.isFinite(Date.parse(v)),'invalid_timestamp');
 const connected = z.object({

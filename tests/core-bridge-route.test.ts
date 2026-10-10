@@ -89,7 +89,7 @@ test('a browser origin is refused before any token is considered',async()=>{
 
 test('the bridge accepts bounded client-action reasons emitted by the Fabric controller',async()=>{
   const h=harness();
-  const reasons=['client_action_busy','action_expired_before_start','step_became_unsafe','rotation_not_observed'];
+  const reasons=['client_action_busy','action_expired_before_start','step_became_unsafe','rotation_not_observed','action_expired_mid_descent','player_flying'];
   for(const [index,reason] of reasons.entries()){
     const r=await h.post(`/bridge/actions/00000000-0000-4000-8000-${String(index+1).padStart(12,'0')}`,
       {claim_id:'11111111-1111-4111-8111-111111111111',state:'cancelled',evidence:{reason}});

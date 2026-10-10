@@ -159,11 +159,11 @@ app.post('/bridge/actions/:id/lease', async req => {
 app.post('/bridge/actions/:id', async req => {
   const id = z.string().uuid().parse((req.params as {id:string}).id);
   const coordinate=z.number().finite().min(-30_000_000).max(30_000_000);const yCoordinate=z.number().finite().min(-4096).max(4096);
-  const evidenceSchema=z.object({kind:z.enum(['walk','turn']).optional(),reason:z.enum(['action_expired_before_start','client_not_ready','movement_input_busy','unsupported_action','invalid_walk_bounds','invalid_turn_bounds','unsafe_or_unsupported_step','step_became_unsafe','client_disconnected','screen_opened','world_session_mismatch','action_lease_stale','action_lease_revoked','action_expired_or_no_movement','no_position_change','rotation_not_observed','client_action_busy','test_server_gate_closed','initial_lease_invalid']).optional(),
+  const evidenceSchema=z.object({kind:z.enum(['walk','turn']).optional(),reason:z.enum(['action_expired_before_start','client_not_ready','movement_input_busy','unsupported_action','invalid_walk_bounds','invalid_turn_bounds','unsafe_or_unsupported_step','step_became_unsafe','action_expired_mid_descent','player_flying','client_disconnected','screen_opened','world_session_mismatch','action_lease_stale','action_lease_revoked','action_expired_or_no_movement','no_position_change','rotation_not_observed','client_action_busy','test_server_gate_closed','initial_lease_invalid']).optional(),
     on_ground:z.boolean().optional(),collision_ahead:z.boolean().optional(),support_ahead:z.boolean().optional(),
     step_status:z.enum(['clear','not_grounded','collision','no_support','unknown_chunk']).optional(),
     obstacle_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),estimated_step_up:z.number().finite().min(0).max(2).optional(),
-    nearest_support_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),nearest_support_drop:z.number().finite().min(0).max(1.5).optional(),
+    nearest_support_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),nearest_support_drop:z.number().finite().min(0).max(3).optional(),
     start_x:coordinate.optional(),start_y:yCoordinate.optional(),start_z:coordinate.optional(),end_x:coordinate.optional(),end_y:yCoordinate.optional(),end_z:coordinate.optional(),
     start_yaw:z.number().finite().min(-360).max(360).optional(),end_yaw:z.number().finite().min(-360).max(360).optional(),
     start_pitch:z.number().finite().min(-90).max(90).optional(),end_pitch:z.number().finite().min(-90).max(90).optional()}).strict();
@@ -209,7 +209,7 @@ function gateway() {
   const server = new McpServer({ name: 'character-harness', version: '0.1.0' });
   const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }] });
   server.registerTool('agent_get_status', { description: 'Read current character status', inputSchema: {} }, async () => result(await status(principal)));
-  server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map. nearest_support_block_id/drop are diagnostic only; walking still requires support_ahead=true, which accepts support within 9/16 of a block.',inputSchema:{}},async()=>result(await currentWorldObservation()));
+  server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map. nearest_support_block_id/drop are diagnostic; support_ahead confirms a loaded collision top within the lesser of the effective player safe-fall distance and 3 blocks.',inputSchema:{}},async()=>result(await currentWorldObservation()));
   server.registerTool('memory_search', { description: 'Search only the current character and audience memory', inputSchema: { query: z.string().max(200).default('') } }, async ({ query }) => result(await search(principal, query)));
   server.registerTool('memory_propose', {
     description: 'Save a personal, unverified note for this audience; do not save secrets or treat guesses as facts',
@@ -222,7 +222,7 @@ function gateway() {
     }
   });
   server.registerTool('agent_walk', {
-    description: 'Walk briefly using normal client movement keys. forward is -1 backward, 0 neutral, 1 forward; strafe is -1 left, 0 neutral, 1 right. Both axes may be combined. This queues an action; use agent_action_status and only say it succeeded after state=completed. Maximum 1200 ms. Cannot jump, sprint, break blocks, or interact.',
+    description: 'Walk briefly using normal client movement keys. Start only while grounded. forward is -1 backward, 0 neutral, 1 forward; strafe is -1 left, 0 neutral, 1 right. Both axes may be combined. A controlled downward step may briefly be airborne only while descending toward confirmed loaded support within the lesser of effective safe fall distance and 3 blocks. Never jump, sprint, break blocks, or interact. This queues an action; use agent_action_status and claim success only after state=completed. Maximum 1200 ms.',
     inputSchema: { forward:z.number().int().min(-1).max(1), strafe:z.number().int().min(-1).max(1), duration_ms:z.number().int().min(100).max(1200), invocation_id:z.string().min(1).max(200), expected_epoch:z.number().int().positive() }
   }, async ({forward,strafe,duration_ms,invocation_id,expected_epoch}) => {
     if (!allowClientWorld) return { ...result({error:'client_world_disabled'}), isError:true };
@@ -240,7 +240,7 @@ function gateway() {
     catch (error) { if (!(error instanceof DomainError)) throw error; return { ...result({error:error.code}), isError:true }; }
   });
   server.registerTool('agent_action_status', {
-    description:'Read the status and local client evidence for one of your previously queued walk/turn operations. For blocked walking, explain step_status, obstacle_block_id/estimated_step_up, and nearest_support_block_id/drop when present; these are bounded diagnostics, not permission to step over a block. The crosshair target is not necessarily the obstacle. Only state=completed proves it succeeded.',
+    description:'Read the status and local client evidence for one of your previously queued walk/turn operations. For blocked walking, explain step_status, obstacle_block_id/estimated_step_up, and nearest_support_block_id/drop when present; these are bounded diagnostics, not permission to step over a block. A walk that expires while airborne is cancelled, never reported completed. The crosshair target is not necessarily the obstacle. Only state=completed proves it succeeded.',
     inputSchema:{id:z.string().uuid()}
   }, async ({id}) => {
     try { const current=await clientActionStatus(principal,id);return result(allowClientWorld?current:{...current,allowed:false}); }
