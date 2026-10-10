@@ -73,7 +73,7 @@ export async function nextEvent(p: Principal) {
       await db.query('COMMIT'); return null;
     }
     if(state.active_event_id)await db.query('DELETE FROM social_memory_staging WHERE character_id=$1 AND audience_id=$2 AND event_id=$3',[p.characterId,p.audienceId,state.active_event_id]);
-    const event = (await db.query(`SELECT id,author_id,author_provenance,author_trust,text,reply_to,source_key FROM social_events
+    const event = (await db.query(`SELECT id,author_id,author_provenance,author_trust,author_metadata,text,reply_to,source_key FROM social_events
       WHERE character_id=$1 AND audience_id=$2 AND NOT processed AND attempts<3 ORDER BY created_at,id LIMIT 1`,
       [p.characterId,p.audienceId])).rows[0];
     if (event) {
@@ -91,9 +91,9 @@ export async function recentConversation(p: Principal, currentEventId: string) {
 export async function loadSocialContext(p:Principal,event:any){return readSocialContext(pool,p,event);}
 export async function inspectEvent(p:Principal,eventId?:string){
   const result=eventId
-    ?await pool.query(`SELECT id,author_id,author_provenance,author_trust,text,reply_to,source_key FROM social_events
+    ?await pool.query(`SELECT id,author_id,author_provenance,author_trust,author_metadata,text,reply_to,source_key FROM social_events
       WHERE id=$1 AND character_id=$2 AND audience_id=$3 AND NOT processed`,[eventId,p.characterId,p.audienceId])
-    :await pool.query(`SELECT id,author_id,author_provenance,author_trust,text,reply_to,source_key FROM social_events
+    :await pool.query(`SELECT id,author_id,author_provenance,author_trust,author_metadata,text,reply_to,source_key FROM social_events
       WHERE character_id=$1 AND audience_id=$2 AND NOT processed ORDER BY created_at,id LIMIT 1`,[p.characterId,p.audienceId]);
   if(eventId&&!result.rowCount)throw new DomainError('event_not_found');
   return result.rows[0]??null;

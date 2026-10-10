@@ -1,8 +1,9 @@
 export type RecentConversationTurn = {
   event_id: string;
   author_id: string;
-  author_provenance: 'legacy_unverified_input' | 'owner_input' | 'fabric_profile_context' | 'minecraft_system_chat';
+  author_provenance: 'legacy_unverified_input' | 'owner_input' | 'fabric_profile_context' | 'minecraft_system_chat' | 'minecraft_voice_stt';
   author_trust: 'unverified';
+  author_metadata?:Record<string,unknown>;
   input: string;
   reply: string | null;
   assistant_silent?: boolean;
@@ -89,15 +90,15 @@ export function boundSocialContext(input: SocialContextInput, maxSerializedChars
 }
 
 export function makeTurnInput<TEvent, TMemory, TSocial>(
-  event: TEvent, memories: TMemory[], recentConversation: RecentConversationTurn[], socialMemory?: TSocial
+  event: TEvent, memories: TMemory[], recentConversation: RecentConversationTurn[], worldObservation?: unknown, socialMemory?: TSocial
 ) {
   const current=event&&typeof event==='object'?(event as {author_id?:string}).author_id:undefined;
-  if(!current)return {event,memories,recent_conversation:recentConversation,...(socialMemory===undefined?{}:{social_memory:socialMemory})};
+  if(!current)return {event,memories,recent_conversation:recentConversation,...(worldObservation===undefined?{}:{world_observation:worldObservation}),...(socialMemory===undefined?{}:{social_memory:socialMemory})};
   const speakers=new Map<string,string>();
   if(current)speakers.set(current,'current_speaker');
   for(const turn of recentConversation)if(!speakers.has(turn.author_id))speakers.set(turn.author_id,`participant_${speakers.size}`);
   const safeEvent = event && typeof event === 'object' ? {...Object.fromEntries(Object.entries(event).filter(([key]) => key !== 'author_id' && key !== 'source_key')),
     ...(speakers.has(current)?{speaker_ref:speakers.get(current)}:{})} : event;
   const history = recentConversation.map(({ author_id, ...turn }) => ({...turn,...(speakers.has(author_id)?{speaker_ref:speakers.get(author_id)}:{})}));
-  return { event: safeEvent, memories, recent_conversation: history, ...(socialMemory === undefined ? {} : { social_memory: socialMemory }) };
+  return { event: safeEvent, memories, recent_conversation: history, ...(worldObservation===undefined?{}:{world_observation:worldObservation}),...(socialMemory === undefined ? {} : { social_memory: socialMemory }) };
 }

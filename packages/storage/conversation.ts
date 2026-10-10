@@ -1,7 +1,7 @@
 import { boundRecentConversation, type RecentConversationTurn } from '../domain/conversation-context.ts';
 import type { Principal } from '../domain/policy.ts';
 
-export const RECENT_CONVERSATION_SQL = `SELECT e.id AS event_id,e.author_id,e.author_provenance,e.author_trust,e.text AS input,r.text AS reply,
+export const RECENT_CONVERSATION_SQL = `SELECT e.id AS event_id,e.author_id,e.author_provenance,e.author_trust,e.author_metadata,e.text AS input,r.text AS reply,
     COALESCE(e.completion_payload->>'decision'='silent',false) AS assistant_silent
   FROM social_events current_event
   JOIN social_events e ON e.character_id=current_event.character_id AND e.audience_id=current_event.audience_id

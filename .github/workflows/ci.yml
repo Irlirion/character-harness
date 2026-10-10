@@ -59,3 +59,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - run: ./gradlew --no-daemon build
         working-directory: client-bridge
+
+  voice:
+    name: Voice service contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build --file Dockerfile.stt --target service-tests .
+      - name: TTS HTTP and WAV contracts (no model download)
+        run: |
+          python3 -m venv /tmp/tts-contracts
+          /tmp/tts-contracts/bin/python -m pip install numpy==2.5.3
+          /tmp/tts-contracts/bin/python -m unittest discover -s apps/tts-service -p 'test_*.py'

@@ -13,7 +13,7 @@ export const SocialMemoryDeltaSchema = z.object({
     channel: z.string().min(1).max(32),
     external_id: z.string().min(1).max(200),
     display_name: z.string().min(1).max(200),
-    provenance: z.enum(['owner_input', 'fabric_profile_context', 'minecraft_system_chat', 'legacy_unverified_input']),
+    provenance: z.enum(['owner_input', 'fabric_profile_context', 'minecraft_system_chat','minecraft_voice_stt', 'legacy_unverified_input']),
     identity_status: z.literal('unverified').default('unverified')
   }).strict()).max(20).default([]),
   facts: z.array(z.object({

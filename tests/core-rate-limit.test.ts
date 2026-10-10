@@ -15,7 +15,10 @@ function harness() {
     pool: { query: async () => { accesses++; return { rows: [], rowCount: 0 }; }, end: async () => {} },
     status: async () => { accesses++; return { paused: false }; }, search: unused, remember: unused,
     control: unused, ingest: unused, nextEvent: unused, recentConversation: unused, complete: unused, deferEvent: unused,
-    enqueueSpeech: unused, claimSpeech: async () => null, speechState: unused, updateSpeech: unused
+    enqueueSpeech: unused, claimSpeech: async () => null, speechState: unused, updateSpeech: unused,
+    enqueueClientAction: unused, clientActionStatus: unused, clientActionLease: unused,
+    claimClientAction: async () => null, finishClientAction: unused, saveWorldObservation: unused,
+    latestWorldObservation: unused, cancelClientActions: async () => ({ cancelled: true })
   };
   const app = buildApp({ principal, tokens, deps, allowSystemChatPublicDemo: false });
   return { app, deps, accesses: () => accesses };
@@ -66,7 +69,7 @@ test('updated MCP SDK works through the authenticated core and restricted HTTP c
     await client.connect(new StreamableHTTPClientTransport(new URL(base + '/mcp'), {
       fetch: coreFetch, requestInit: { headers: { Authorization: `Bearer ${tokens.engine}` } }
     }));
-    assert.deepEqual((await client.listTools()).tools.map(t => t.name).sort(), ['agent_get_status', 'memory_propose', 'memory_search', 'memory_social_list', 'memory_stage_delta']);
+    assert.deepEqual((await client.listTools()).tools.map(t => t.name).sort(), ['agent_action_status', 'agent_get_status', 'agent_observe', 'agent_turn', 'agent_walk', 'memory_propose', 'memory_search', 'memory_social_list', 'memory_stage_delta']);
     const result = await client.callTool({ name: 'agent_get_status', arguments: {} });
     assert.equal(result.isError, undefined);
     assert.deepEqual(result.content, [{ type: 'text', text: '{"paused":false}' }]);
@@ -80,7 +83,7 @@ test('MCP stage and obligation retrieval use trusted event/epoch headers',async(
     control:async()=>({}),ingest:async()=>({inserted:true,event_id:null}),nextEvent:async()=>null,recentConversation:async()=>[],complete:async()=>({}),deferEvent:async()=>({}),
     stageMemory:async(...args:any[])=>{calls.push(['stage',...args]);return {staged:true,stage_version:1};},
     socialCommitmentPage:async(...args:any[])=>{calls.push(['list',...args]);return {items:[],total:0,offset:0,limit:5};},
-    enqueueSpeech:async()=>({}),claimSpeech:async()=>null,speechState:async()=>null,updateSpeech:async()=>({})
+    enqueueSpeech:async()=>({}),claimSpeech:async()=>null,speechState:async()=>null,updateSpeech:async()=>({}), enqueueClientAction:async()=>({}),clientActionStatus:async()=>({}),clientActionLease:async()=>({}),claimClientAction:async()=>null,finishClientAction:async()=>({}),saveWorldObservation:async()=>({}),latestWorldObservation:async()=>null,cancelClientActions:async()=>({})
   };
   const app=buildApp({principal,tokens,deps,allowSystemChatPublicDemo:false});
   const client=new Client({name:'scope-test',version:'1'});
@@ -102,4 +105,33 @@ test('MCP stage and obligation retrieval use trusted event/epoch headers',async(
       assert.equal(denied.isError,true);
     }finally{await unscoped.close();}
   }finally{await client.close();await app.close();}
+});
+
+test('bridge polling leaves event admission available and keeps its own bounded budget', async () => {
+  const h = harness();
+  let ingested = 0;
+  h.deps.ingest = async () => { ingested++; return { inserted: true, event_id: null }; };
+  const app = buildApp({ principal, tokens, deps: h.deps, allowSystemChatPublicDemo: false });
+  const headers = { authorization: `Bearer ${tokens.bridge}` };
+  try {
+    // 400 action polls + 60 reply polls + 240 lease polls fit in one minute.
+    for (let i = 0; i < 700; i++) {
+      const r = await app.inject({ method: 'POST', url: '/bridge/actions/claim', headers, payload: {} });
+      assert.equal(r.statusCode, 200);
+    }
+    for (let i = 0; i < 180; i++) {
+      const r = await app.inject({ method: 'POST', url: '/bridge/events', headers, payload: {
+        source_key: `minecraft:11111111-1111-4111-8111-111111111111:${i}`,
+        author_id: '11111111-1111-4111-8111-111111111111',
+        author_provenance: 'fabric_profile_context', text: 'hi'
+      } });
+      assert.equal(r.statusCode, 200);
+    }
+    assert.equal((await app.inject({ method: 'POST', url: '/bridge/events', headers, payload: {} })).statusCode, 429);
+    assert.equal(ingested, 180);
+    for (let i = 700; i < 900; i++) {
+      assert.equal((await app.inject({ method: 'POST', url: '/bridge/actions/claim', headers, payload: {} })).statusCode, 200);
+    }
+    assert.equal((await app.inject({ method: 'POST', url: '/bridge/actions/claim', headers, payload: {} })).statusCode, 429);
+  } finally { await app.close(); await h.app.close(); }
 });

@@ -5,7 +5,7 @@ CREATE TABLE social_people (
   channel text NOT NULL,
   external_id text NOT NULL,
   display_name text NOT NULL,
-  provenance text NOT NULL CHECK (provenance IN ('owner_input','fabric_profile_context','minecraft_system_chat','legacy_unverified_input')),
+  provenance text NOT NULL CHECK (provenance IN ('owner_input','fabric_profile_context','minecraft_system_chat','minecraft_voice_stt','legacy_unverified_input')),
   identity_status text NOT NULL CHECK (identity_status IN ('unverified','verified')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

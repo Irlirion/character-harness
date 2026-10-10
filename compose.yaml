@@ -31,6 +31,7 @@ services:
       OWNER_TOKEN_FILE: /run/secrets/owner_token
       AUDIO_TOKEN_FILE: /run/secrets/audio_token
       BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
+      BRIDGE_CLIENT_WORLD_ENABLED: ${BRIDGE_CLIENT_WORLD_ENABLED:-false}
       CHARACTER_ID: ${CHARACTER_ID:-lada}
       CHARACTER_FILE: ${CHARACTER_FILE:-characters/Lada/personalities.yml}
       AUDIENCE_ID: demo-public
@@ -92,9 +93,41 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: "no"
+  stt:
+    build:
+      context: .
+      dockerfile: Dockerfile.stt
+    profiles: [stt]
+    environment:
+      STT_TOKEN_FILE: /run/secrets/stt_token
+      STT_MODEL_DIR: /models
+      STT_HOST: 0.0.0.0
+      STT_PORT: 3082
+      STT_CPU_THREADS: ${STT_CPU_THREADS:-4}
+    secrets: [stt_token]
+    volumes:
+      - ${STT_MODEL_DIR:-./work/stt-models}:/models:ro
+    networks: [stt_internal]
+    ports: ['127.0.0.1:3082:3082']
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Measured peak is 581 MiB on the worst case the service accepts (120 sequential 8 s requests);
+    # see docs/reviews/stt-model-selection.md, which records both measured scenarios.
+    mem_limit: 2g
+    cpus: 4.0
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:3082/ready", timeout=1).read()']
+      interval: 5s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
 networks:
   storage: {internal: true}
   agent: {}
+  stt_internal: {}
 volumes:
   postgres_data:
   engine_data:
@@ -107,3 +140,4 @@ secrets:
   model_api_key: {file: ./secrets/model_api_key}
   audio_token: {file: ./secrets/audio_token}
   bridge_token: {file: ./secrets/bridge_token}
+  stt_token: {file: ./secrets/stt_token}

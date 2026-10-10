@@ -31,7 +31,7 @@ test('/engine/complete keeps legacy requests compatible and rejects malformed de
   const deps:CoreDeps={
     pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},status:unused,search:unused,remember:unused,control:unused,ingest:unused,
     nextEvent:unused,recentConversation:unused,complete:async(...args:any[])=>{calls.push(args);return {saved:true,memory:args[6]?{status:'rejected',reason:args[6]}:undefined};},
-    deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused
+    deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused, enqueueClientAction:async()=>({}),clientActionStatus:async()=>({}),clientActionLease:async()=>({}),claimClientAction:async()=>null,finishClientAction:async()=>({}),saveWorldObservation:async()=>({}),latestWorldObservation:async()=>null,cancelClientActions:async()=>({})
   };
   const app=buildApp({principal:{characterId:'lada',audienceId:'demo'},tokens,deps,allowSystemChatPublicDemo:false});
   const event_id=randomUUID();
@@ -72,7 +72,7 @@ test('PostgreSQL completion commits reply with delta, rejects bad delta locally,
   const claim=(id:string)=>pool.query("UPDATE characters SET active_event_id=$1,lease_until=now()+interval '1 minute' WHERE id='lada'",[id]);
   try{
     await admin.query(`CREATE SCHEMA ${schema}`);
-    for(const version of ['001-core','002-speech','003-bridge-delivery','004-bridge-author-provenance','005-event-admission','006-social-memory','007-memory-staging'])
+    for(const version of ['001-core','002-speech','003-bridge-delivery','004-bridge-author-provenance','005-event-admission','005-client-actions','006-voice-stt-provenance','007-social-memory','008-memory-staging'])
       await pool.query(await readFile(new URL(`../migrations/${version}.sql`,import.meta.url),'utf8'));
     await pool.query("INSERT INTO characters(id,name,persona,epoch) VALUES('lada','Lada','test',4)");
     await source(eventId,'owner:first');
@@ -195,7 +195,7 @@ test('PostgreSQL completion commits reply with delta, rejects bad delta locally,
     const stagedComplete=await completeEvent(pool,p,stagedEvent,'staged reply',4,false);
     assert.equal(stagedComplete.memory?.status,'accepted');
     const assembled=await loadSocialContext(pool,p,{author_id:'player-uuid',source_key:'owner:staged'});
-    const realTurnInput=makeTurnInput({id:stagedEvent,author_id:'player-uuid',source_key:'owner:staged',text:'follow up'},[],[],assembled);
+    const realTurnInput=makeTurnInput({id:stagedEvent,author_id:'player-uuid',source_key:'owner:staged',text:'follow up'},[],[],undefined,assembled);
     assert.equal((realTurnInput.event as any).speaker_ref,'current_speaker');
     assert.equal(JSON.stringify(realTurnInput).includes('player-uuid'),false);
     assert.ok(assembled.commitments.some((row:any)=>row.key==='staged-followup'&&row.person_ref==='current_speaker'));

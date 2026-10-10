@@ -8,7 +8,7 @@ import type { SocialContextInput } from '../domain/conversation-context.ts';
 export type DeltaResult = { status: 'accepted' | 'rejected'; reason?: string; state_version?: number };
 
 function sourceType(key: string) {
-  return key.startsWith('minecraft-system:') ? 'minecraft_system' : key.startsWith('minecraft:') ? 'minecraft' : key.startsWith('telegram:') ? 'telegram' : 'owner';
+  return key.startsWith('minecraft-voice:') ? 'minecraft_voice' : key.startsWith('minecraft-system:') ? 'minecraft_system' : key.startsWith('minecraft:') ? 'minecraft' : key.startsWith('telegram:') ? 'telegram' : 'owner';
 }
 
 /** Read-only audience scoped data for the common bounded turn context. */
@@ -166,9 +166,7 @@ export async function applySocialMemoryDelta(
       [[...sourceIds], scope.characterId, scope.audienceId, scope.eventId, eventRows[0].created_at]);
     if (scopedSources.rowCount !== sourceIds.size) return { status: 'rejected', reason: 'source_scope_mismatch' };
   }
-  const channel = eventRows[0].source_key.startsWith('minecraft-system:') ? 'minecraft_system'
-    : eventRows[0].source_key.startsWith('minecraft:') ? 'minecraft'
-      : eventRows[0].source_key.startsWith('telegram:') ? 'telegram' : 'owner';
+  const channel = sourceType(eventRows[0].source_key);
   for (const person of delta.people) {
     if (person.external_id !== eventRows[0].author_id || person.channel !== channel || person.provenance !== eventRows[0].author_provenance) {
       return { status: 'rejected', reason: 'person_provenance_mismatch' };

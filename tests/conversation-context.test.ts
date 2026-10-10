@@ -60,3 +60,11 @@ test('turn input replaces raw author ids with stable opaque speaker refs when cu
   assert.equal('author_id' in (input.recent_conversation[0] as any),false);
   assert.equal(JSON.stringify(input).includes('minecraft-system:'),false);
 });
+
+test('turn input carries the current bounded world observation when core marks it fresh',()=>{
+  const observation={available:true,stale:false,connected:true,session_id:'session',server:'mc.agicraft.ru:25565',age_ms:459,
+    snapshot:{self:{x:0,y:64,z:0},players:[{name:'Irlirion',uuid:'11111111-1111-4111-8111-111111111111',distance:1.82,line_of_sight:true}],crosshair:{type:'player'}}};
+  assert.deepEqual(makeTurnInput({text:'кто рядом?'},[],[],observation),{
+    event:{text:'кто рядом?'},memories:[],recent_conversation:[],world_observation:observation
+  });
+});
