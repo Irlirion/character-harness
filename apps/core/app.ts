@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
@@ -33,6 +34,15 @@ export type BuildAppOptions = {
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
 export function buildApp({ principal, tokens, allowSystemChatPublicDemo, deps }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
+// Roles share a token, so budget by role rather than IP or attacker-supplied headers.
+// Audio polls every 250 ms; keep its budget separate from event ingestion.
+app.register(rateLimit, {
+  hook: 'preHandler', timeWindow: '1 minute',
+  max: req => ({ audio: 600, engine: 300, bridge: 180, owner: 120 }[requiredRole(requestPath(req.url)) ?? 'owner']),
+  keyGenerator: req => requiredRole(requestPath(req.url)) ?? req.ip
+});
+// Install routes after the plugin's onRoute hook is ready.
+app.after(() => {
 const { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken } = tokens;
 const { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent,
   enqueueSpeech, claimSpeech, speechState, updateSpeech } = deps;
@@ -48,6 +58,10 @@ app.addHook('onRequest', async (req, reply) => {
   if (required === null || !matchesToken(req.headers.authorization, required)) return reply.code(401).send({ error: 'unauthorized' });
 });
 app.setErrorHandler((error, _req, reply) => {
+  if (error instanceof Error && 'statusCode' in error && error.statusCode === 429) return reply.code(429).send({ error: 'rate_limit_exceeded' });
+  if (error instanceof DomainError && ['event_queue_full', 'author_rate_limit'].includes(error.code)) {
+    return reply.header('Retry-After', '60').code(429).send({ error: error.code });
+  }
   if (error instanceof DomainError) return reply.code(409).send({ error: error.code });
   if (error instanceof z.ZodError) return reply.code(400).send({ error: 'invalid_input' });
   app.log.error({ name: error instanceof Error ? error.name : 'unknown' }, 'Request failed');
@@ -157,6 +171,6 @@ app.route({ method: ['GET', 'DELETE'], url: '/mcp', handler: async (_req, reply)
 const shutdown = async () => { await app.close(); await pool.end(); };
 process.once('SIGTERM', () => { void shutdown(); });
 process.once('SIGINT', () => { void shutdown(); });
-
+});
 return app;
 }
