@@ -16,7 +16,7 @@
     "smoke": "node --experimental-strip-types scripts/smoke.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@earendil-works/pi-coding-agent": "1.0.4",
     "@fastify/rate-limit": "10.3.0",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@openai/codex": "0.160.0",
