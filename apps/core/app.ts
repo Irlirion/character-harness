@@ -6,6 +6,9 @@ import { z } from 'zod';
 import type { Principal } from '../../packages/domain/policy.ts';
 import { DomainError, matchesToken, requestPath, requiredRole } from '../../packages/domain/policy.ts';
 import { BridgeEventScopeError, parseBridgeEvent } from '../../packages/domain/bridge-event.ts';
+import { SocialMemoryDeltaSchema } from '../../packages/domain/social-memory.ts';
+import { SocialMemoryProposalSchema } from '../../packages/domain/social-memory.ts';
+import { boundSocialContext, makeTurnInput, type SocialContextInput } from '../../packages/domain/conversation-context.ts';
 
 export type CoreTokens = { engine: string; owner: string; audio: string; bridge: string };
 export type CoreDeps = {
@@ -17,8 +20,12 @@ export type CoreDeps = {
   ingest: (p: Principal, event: any) => Promise<{ inserted: boolean; event_id: string | null }>;
   nextEvent: (p: Principal) => Promise<any>;
   recentConversation: (p: Principal, currentEventId: string) => Promise<any>;
-  complete: (p: Principal, eventId: string, text: string, epoch: number, speak?: boolean) => Promise<any>;
-  deferEvent: (p: Principal, eventId: string) => Promise<any>;
+  loadSocialMemory?: (p: Principal, event: any) => Promise<SocialContextInput>;
+  inspectEvent?: (p: Principal, eventId?: string) => Promise<any>;
+  stageMemory?: (p: Principal, eventId: string, epoch: number, invocationId: string, proposal: unknown) => Promise<any>;
+  socialCommitmentPage?: (p:Principal,eventId:string,epoch:number,limit:number,offset:number)=>Promise<any>;
+  complete: (p: Principal, eventId: string, text: string | null, epoch: number, speak?: boolean, delta?: any, deltaDiagnostic?: string, rawDelta?: unknown, decision?: 'reply'|'silent') => Promise<any>;
+  deferEvent: (p: Principal, eventId: string, epoch?: number) => Promise<any>;
   enqueueSpeech: (p: Principal, requestId: string, text: string) => Promise<any>;
   claimSpeech: (p: Principal) => Promise<any>;
   speechState: (p: Principal, id: string) => Promise<any>;
@@ -29,10 +36,16 @@ export type BuildAppOptions = {
   tokens: CoreTokens;
   allowSystemChatPublicDemo: boolean;
   deps: CoreDeps;
+  memoryInstructions?: string;
+  responseInstructions?: string;
 };
 
+function emptySocialContext(): SocialContextInput {
+  return {working_state:null,current_person:null,facts:[],relationships:[],commitments:[],other_open_commitment_count:0,counts:{facts:0,relationships:0,commitments:0}};
+}
+
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
-export function buildApp({ principal, tokens, allowSystemChatPublicDemo, deps }: BuildAppOptions): FastifyInstance {
+export function buildApp({ principal, tokens, allowSystemChatPublicDemo, deps, memoryInstructions = '', responseInstructions = '' }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 // Roles share a token, so budget by role rather than IP or attacker-supplied headers.
 // Audio polls every 250 ms; keep its budget separate from event ingestion.
@@ -71,6 +84,27 @@ app.get('/health', async () => ({ alive: true }));
 app.get('/ready', async () => { await pool.query('SELECT 1'); return { ready: true }; });
 app.get('/engine/status', async () => status(principal));
 app.get('/owner/status', async () => ({ character: await status(principal), audience: principal.audienceId, adapters: { minecraft: 'not_implemented', telegram: 'not_implemented', voice: 'not_implemented' } }));
+app.get('/owner/inspect-context', async req => {
+  if (!deps.inspectEvent) throw new DomainError('context_inspection_unavailable');
+  const query=z.object({event_id:z.string().uuid().optional()}).strict().parse(req.query);
+  const event=await deps.inspectEvent(principal,query.event_id);
+  if(!event)return {event:null,turn_input:null,memory_instructions:memoryInstructions,response_instructions:responseInstructions,diagnostics:{reason:'no_pending_event'}};
+  const [state,memories,recent,social]=await Promise.all([
+    status(principal),search(principal,''),deps.recentConversation(principal,event.id),
+    deps.loadSocialMemory?deps.loadSocialMemory(principal,event):Promise.resolve(emptySocialContext())
+  ]);
+  const bounded=boundSocialContext(social);
+  const turnInput=makeTurnInput(event,memories,recent,bounded);
+  return {event_id:event.id,turn_input:turnInput,memory_instructions:memoryInstructions,response_instructions:responseInstructions,diagnostics:{
+    reconstruction:'current_scoped_memory_for_selected_pending_event',
+    block_chars:{event:JSON.stringify(turnInput.event).length,memories:JSON.stringify(turnInput.memories).length,
+      recent_conversation:JSON.stringify(turnInput.recent_conversation).length,social_memory:bounded.serialized_chars,
+      memory_instructions:memoryInstructions.length,response_instructions:responseInstructions.length},
+    selected:{facts:bounded.facts.length,relationships:bounded.relationships.length,commitments:bounded.commitments.length},
+    omitted:bounded.omitted,other_open_commitment_count:bounded.other_open_commitment_count,
+    sources:[...bounded.facts,...bounded.relationships,...bounded.commitments].map(row=>row.source),epoch:state.epoch
+  }};
+});
 app.post('/owner/pause', async () => control(principal, true));
 app.post('/owner/resume', async () => control(principal, false));
 app.post('/owner/speech', async req => {
@@ -130,23 +164,56 @@ app.get('/engine/input', async (_req, reply) => {
   const state = await status(principal);
   const currentEvent = state.paused ? null : event;
   const recent_conversation = currentEvent ? await recentConversation(principal, currentEvent.id) : [];
+  const memories=await search(principal,'');
+  const social_memory=currentEvent?boundSocialContext(deps.loadSocialMemory?await deps.loadSocialMemory(principal,currentEvent):emptySocialContext()):undefined;
+  const turn_input=currentEvent?makeTurnInput(currentEvent,memories,recent_conversation,social_memory):null;
   return { character: state, audience_id: principal.audienceId,
-    event: currentEvent, memories: await search(principal, ''), recent_conversation };
+    event: currentEvent, memories, recent_conversation, social_memory, turn_input, memory_instructions:memoryInstructions,response_instructions:responseInstructions };
 });
 app.post('/engine/defer', async req => {
-  const event_id = z.string().uuid().parse((req.body as { event_id: string }).event_id);
-  return deferEvent(principal, event_id);
+  const body=z.object({event_id:z.string().uuid(),epoch:z.number().int().positive().optional()}).strict().parse(req.body);
+  return deps.deferEvent(principal, body.event_id, body.epoch);
 });
 app.post('/engine/complete', async req => {
-  const body = z.object({ event_id: z.string().uuid(), text: z.string().min(1).max(8000), epoch: z.number().int().positive(), speak: z.boolean().default(false) }).strict().parse(req.body);
-  await complete(principal, body.event_id, body.text, body.epoch, body.speak);
-  return { saved: true };
+  const base={event_id:z.string().uuid(),epoch:z.number().int().positive(),memory_delta:z.unknown().optional()};
+  const body=z.union([
+    z.object({...base,decision:z.literal('reply'),text:z.string().min(1).max(8000),speak:z.boolean().default(false)}).strict(),
+    z.object({...base,decision:z.literal('silent')}).strict(),
+    z.object({...base,text:z.string().min(1).max(8000),speak:z.boolean().default(false)}).strict()
+  ]).parse(req.body);
+  const decision='decision' in body?body.decision:'reply';
+  const text='text' in body?body.text:null;
+  const speak=decision==='reply'&&'speak' in body?body.speak:false;
+  let delta: ReturnType<typeof SocialMemoryDeltaSchema.parse> | undefined;
+  let diagnostic: string | undefined;
+  if (Object.hasOwn(body, 'memory_delta')) {
+    const parsed = SocialMemoryDeltaSchema.safeParse(body.memory_delta);
+    if (parsed.success) delta = parsed.data;
+    else diagnostic = 'schema_invalid';
+  }
+  return complete(principal, body.event_id, text, body.epoch, speak, delta, diagnostic, body.memory_delta,decision);
 });
-function gateway() {
+function gateway(scope?: {eventId:string;epoch:number}) {
   const server = new McpServer({ name: 'character-harness', version: '0.1.0' });
   const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }] });
   server.registerTool('agent_get_status', { description: 'Read current character status', inputSchema: {} }, async () => result(await status(principal)));
   server.registerTool('memory_search', { description: 'Search only the current character and audience memory', inputSchema: { query: z.string().max(200).default('') } }, async ({ query }) => result(await search(principal, query)));
+  server.registerTool('memory_stage_delta', {
+    description: 'Stage one complete sourced memory proposal for this active turn. A later call replaces the earlier staged proposal. Core supplies participant identity, source, audience, epoch, and version. Never include the proposal in your reply.',
+    inputSchema: { invocation_id: z.string().min(1).max(200), proposal: SocialMemoryProposalSchema }
+  }, async ({invocation_id,proposal}) => {
+    if(!scope||!deps.stageMemory)return {...result({error:'turn_scope_missing'}),isError:true};
+    try{return result(await deps.stageMemory(principal,scope.eventId,scope.epoch,invocation_id,proposal));}
+    catch(error){if(error instanceof DomainError)return {...result({error:error.code}),isError:true};throw error;}
+  });
+  server.registerTool('memory_social_list', {
+    description:'List open commitments for the current unverified participant, with bounded pagination. Use when the context reports omitted commitments.',
+    inputSchema:{limit:z.number().int().min(1).max(25).default(10),offset:z.number().int().min(0).max(500).default(0)}
+  },async({limit,offset})=>{
+    if(!scope||!deps.socialCommitmentPage)return {...result({error:'turn_scope_missing'}),isError:true};
+    try{return result(await deps.socialCommitmentPage(principal,scope.eventId,scope.epoch,limit,offset));}
+    catch(error){if(error instanceof DomainError)return {...result({error:error.code}),isError:true};throw error;}
+  });
   server.registerTool('memory_propose', {
     description: 'Save a personal, unverified note for this audience; do not save secrets or treat guesses as facts',
     inputSchema: { text: z.string().min(1).max(2000), invocation_id: z.string().min(1).max(200), epoch: z.number().int().positive() }
@@ -160,7 +227,10 @@ function gateway() {
   return server;
 }
 app.post('/mcp', async (req, reply) => {
-  const server = gateway();
+  const eventId=typeof req.headers['x-harness-event']==='string'?req.headers['x-harness-event']:undefined;
+  const epochHeader=typeof req.headers['x-harness-epoch']==='string'?req.headers['x-harness-epoch']:undefined;
+  const scope=eventId&&z.string().uuid().safeParse(eventId).success&&epochHeader&&/^\d+$/.test(epochHeader)?{eventId,epoch:Number(epochHeader)}:undefined;
+  const server = gateway(scope);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   reply.hijack();
   reply.raw.on('close', () => { void transport.close(); void server.close(); });

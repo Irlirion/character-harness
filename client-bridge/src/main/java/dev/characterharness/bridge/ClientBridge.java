@@ -23,19 +23,17 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
 public final class ClientBridge implements ClientModInitializer {
     private static final Logger LOG = LoggerFactory.getLogger("CharacterHarnessBridge");
     private final Set<String> queuedReplies = ConcurrentHashMap.newKeySet();
-    private final Map<String, Long> recentlyForwarded = new ConcurrentHashMap<>();
+    private final ChatDeduplicator deduplicator = new ChatDeduplicator();
     private final ScheduledExecutorService io = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "character-harness-bridge");
         thread.setDaemon(true);
@@ -43,13 +41,11 @@ public final class ClientBridge implements ClientModInitializer {
     });
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
     private BridgeConfig config;
-    private Pattern addressed;
     private boolean systemServerWarningLogged;
 
     @Override public void onInitializeClient() {
         try {
             config = BridgeConfig.load();
-            addressed = ChatAddress.pattern(config.characterName());
         } catch (Exception error) {
             LOG.error("Bridge disabled: {}", error.getMessage());
             return;
@@ -60,7 +56,7 @@ public final class ClientBridge implements ClientModInitializer {
             LOG.info("Unverified system-chat adapter enabled for {}; it is limited to the public demo scope.", config.systemChatServer());
         }
         io.scheduleWithFixedDelay(this::pollReplies, 1, 1, TimeUnit.SECONDS);
-        LOG.info("Bridge enabled for addressed chat; account UUIDs are forwarded as supplied by the server chat context. systemChatEnabled={}", config.systemChatEnabled());
+        LOG.info("Bridge enabled for visible user chat; account UUIDs are forwarded as supplied by the server chat context. systemChatEnabled={}", config.systemChatEnabled());
     }
 
     private void onChat(SignedMessage signed, com.mojang.authlib.GameProfile sender, Instant received) {
@@ -70,10 +66,8 @@ public final class ClientBridge implements ClientModInitializer {
         if (!author.equals(profileId)) return;
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null || client.player.getUuid().equals(author)) return;
-        String text = ChatAddress.extract(signed.getSignedContent(), signed.filterMask(), addressed);
-        if (text == null) return;
-        if (text.isEmpty() || text.length() > 1000) return;
-        if (!claimRecent(sender.name(), text)) return;
+        String text = ChatAddress.visible(signed.getSignedContent(), signed.filterMask());
+        if (text == null || text.length() > 1000 || !deduplicator.claim(sender.name(),text,"chat",System.nanoTime())) return;
         try {
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
             String sourceKey = "minecraft:" + author + ":" + received.toEpochMilli() + ":" + digest;
@@ -87,10 +81,10 @@ public final class ClientBridge implements ClientModInitializer {
         if (overlay || !config.systemChatEnabled()) return;
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null || !isAllowedSystemChatServer(client.getCurrentServerEntry())) return;
-        SystemChatParser.AddressedMessage parsed = SystemChatParser.parse(visibleLine, addressed);
+        SystemChatParser.PlayerMessage parsed = SystemChatParser.parse(visibleLine);
         if (parsed == null || parsed.text().length() > 1000
                 || client.player.getName().getString().equalsIgnoreCase(parsed.nickname())
-                || !claimRecent(parsed.nickname(), parsed.text())) return;
+                || !deduplicator.claim(parsed.nickname(),parsed.text(),"game",System.nanoTime())) return;
         try {
             String nickname = parsed.nickname().toLowerCase(Locale.ROOT);
             String authorId = "minecraft-system:" + config.systemChatServer() + ":" + nickname;
@@ -115,16 +109,6 @@ public final class ClientBridge implements ClientModInitializer {
             LOG.warn("System-chat event ignored: connected server is not the configured test server.");
         }
         return false;
-    }
-
-    private synchronized boolean claimRecent(String nickname, String text) {
-        long now = System.nanoTime();
-        String key = nickname.toLowerCase(Locale.ROOT) + "\u0000" + text;
-        Long previous = recentlyForwarded.get(key);
-        recentlyForwarded.entrySet().removeIf(entry -> now - entry.getValue() > TimeUnit.SECONDS.toNanos(2));
-        if (previous != null && now - previous <= TimeUnit.SECONDS.toNanos(2)) return false;
-        recentlyForwarded.put(key, now);
-        return true;
     }
 
     private void forwardEvent(String sourceKey, String authorId, String authorProvenance, String sourceServer, String text) {

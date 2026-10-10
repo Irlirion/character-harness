@@ -1,7 +1,8 @@
 import { buildApp } from './app.ts';
+import { readFile } from 'node:fs/promises';
 import { loadCharacter } from '../../packages/domain/character.ts';
 import { secret } from '../../packages/domain/secrets.ts';
-import { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent } from '../../packages/storage/db.ts';
+import { pool, status, search, remember, control, ingest, nextEvent, recentConversation, loadSocialContext, inspectEvent, stageMemory, socialCommitmentPage, complete, deferEvent } from '../../packages/storage/db.ts';
 import { enqueueSpeech, claimSpeech, speechState, updateSpeech } from '../../packages/storage/speech.ts';
 
 const character = await loadCharacter(process.env.CHARACTER_FILE, process.env.CHARACTER_ID);
@@ -13,6 +14,8 @@ const bridgeToken = secret('BRIDGE_TOKEN');
 const systemChatDemoSetting = process.env.BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO ?? 'false';
 if (systemChatDemoSetting !== 'true' && systemChatDemoSetting !== 'false') throw new Error('BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO must be true or false');
 const allowSystemChatPublicDemo = systemChatDemoSetting === 'true';
+const memoryInstructions=await readFile(new URL('../../characters/memory-rules.md',import.meta.url),'utf8');
+const responseInstructions=await readFile(new URL('../../characters/social-response-rules.md',import.meta.url),'utf8');
 if (audioToken.length < 32 || audioToken === ownerToken || audioToken === engineToken) throw new Error('Distinct audio token required');
 if (bridgeToken.length < 32 || new Set([bridgeToken, ownerToken, engineToken, audioToken]).size !== 4) throw new Error('Distinct bridge token required');
 if (engineToken.length < 32 || ownerToken.length < 32 || engineToken === ownerToken) throw new Error('Distinct tokens of at least 32 characters required');
@@ -22,7 +25,9 @@ await pool.query(`INSERT INTO characters(id,name,persona) VALUES($1,$2,$3)
 const app = buildApp({
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken },
   allowSystemChatPublicDemo,
-  deps: { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent,
+  memoryInstructions,
+  responseInstructions,
+  deps: { pool, status, search, remember, control, ingest, nextEvent, recentConversation, loadSocialMemory:loadSocialContext, inspectEvent, stageMemory, socialCommitmentPage, complete, deferEvent,
     enqueueSpeech, claimSpeech, speechState, updateSpeech }
 });
 const shutdown = async () => { await app.close(); await pool.end(); };

@@ -16,10 +16,19 @@ test('recent conversation query stays within the current character and audience,
   assert.match(sql,/current_event\.character_id=\$1 AND current_event\.audience_id=\$2/);
   assert.match(sql,/e\.character_id=\$1 AND e\.audience_id=\$2 AND e\.processed=true/);
   assert.match(sql,/JOIN replies r ON r\.event_id=e\.id/);
+  assert.match(sql,/LEFT JOIN replies r ON r\.event_id=e\.id/);
+  assert.match(sql,/completion_payload->>'decision'='silent'/);
   assert.match(sql,/\(e\.created_at,e\.id\) < \(current_event\.created_at,current_event\.id\)/);
   assert.match(sql,/ORDER BY e\.created_at DESC,e\.id DESC LIMIT 10/);
   assert.deepEqual(values,['lada','demo-public','current-event-id']);
   assert.deepEqual(result,rows);
+});
+
+test('bounded history preserves explicit silent observations',()=>{
+  const silence={...turn('silent-event','участник спросил другое',''),reply:null,assistant_silent:true};
+  const result=boundRecentConversation([silence]);
+  assert.equal(result[0].assistant_silent,true);
+  assert.equal(result[0].reply,null);
 });
 
 test('recent conversation is chronological, capped at ten turns and the serialized character budget',()=>{
@@ -39,4 +48,15 @@ test('turn input carries recent pairs with provenance and trust intact',()=>{
   assert.deepEqual(makeTurnInput({text:'продолжим'},[{text:'память'}],history),{
     event:{text:'продолжим'},memories:[{text:'память'}],recent_conversation:history
   });
+});
+
+test('turn input replaces raw author ids with stable opaque speaker refs when current participant is known',()=>{
+  const history=[turn('earlier','question','answer')];
+  const input=makeTurnInput({id:'current',author_id:'minecraft-system:mc.agicraft.ru:25565:earlier',source_key:'private-source',text:'continue'},[],history);
+  assert.equal((input.event as any).speaker_ref,'current_speaker');
+  assert.equal('author_id' in (input.event as any),false);
+  assert.equal('source_key' in (input.event as any),false);
+  assert.equal((input.recent_conversation[0] as any).speaker_ref,'current_speaker');
+  assert.equal('author_id' in (input.recent_conversation[0] as any),false);
+  assert.equal(JSON.stringify(input).includes('minecraft-system:'),false);
 });

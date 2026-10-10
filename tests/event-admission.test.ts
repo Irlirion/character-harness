@@ -14,7 +14,7 @@ test('PostgreSQL admission serializes concurrent writes, preserves replay, and c
   const event = (key: string, author = 'player') => ({ source_key: key, author_id: author, text: 'hi', author_provenance: 'owner_input', author_trust: 'unverified' as const });
   try {
     await admin.query(`CREATE SCHEMA ${schema}`);
-    for (const version of ['001-core', '002-speech', '003-bridge-delivery', '004-bridge-author-provenance', '005-event-admission']) {
+    for (const version of ['001-core', '002-speech', '003-bridge-delivery', '004-bridge-author-provenance', '005-event-admission', '006-social-memory', '007-memory-staging']) {
       await pool.query(await readFile(new URL(`../migrations/${version}.sql`, import.meta.url), 'utf8'));
     }
     await pool.query("INSERT INTO characters(id,name,persona) VALUES('lada','test','test')");
@@ -27,7 +27,7 @@ test('PostgreSQL admission serializes concurrent writes, preserves replay, and c
     await assert.rejects(ingestEvent(pool, p, event('processed-budget')), { code: 'author_rate_limit' });
     await pool.query("UPDATE social_events SET created_at=now()-interval '61 seconds'");
     assert.equal((await ingestEvent(pool, p, event('window-reset'))).inserted, true);
-    await pool.query('TRUNCATE social_events CASCADE');
+    await pool.query('DELETE FROM social_events');
     const queueBurst = await Promise.allSettled(Array.from({ length: 102 }, (_, i) => ingestEvent(pool,
       { ...p, audienceId: i % 2 ? 'other' : 'demo' }, event(`queue-${i}`, `author-${i}`))));
     assert.equal(queueBurst.filter(r => r.status === 'fulfilled').length, 100);

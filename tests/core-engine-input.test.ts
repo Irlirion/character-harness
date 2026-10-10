@@ -30,3 +30,28 @@ test('/engine/input loads prior conversation for the current scoped event and om
     assert.equal(requested.length,1);
   }finally{await app.close();}
 });
+
+test('owner inspect reconstructs pending input without claiming or mutating the event',async()=>{
+  const calls:string[]=[];
+  const event={id:'11111111-1111-4111-8111-111111111111',author_id:'private-external-id',source_key:'owner:demo',text:'hi'};
+  const app=buildApp({principal:{characterId:'lada',audienceId:'demo-public'},tokens,allowSystemChatPublicDemo:false,memoryInstructions:'memory rules',deps:{
+    pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},
+    status:async()=>{calls.push('status');return {paused:false,epoch:5,persona:'secret persona'};},
+    search:async()=>{calls.push('search');return [];},remember:unused,control:unused,ingest:unused,
+    nextEvent:async()=>{calls.push('claim');return event;},recentConversation:async()=>{calls.push('history');return [];},
+    inspectEvent:async(_p,id)=>{calls.push('inspect');assert.equal(id,event.id);return event;},
+    loadSocialMemory:async()=>{calls.push('social');return {working_state:{version:3,topic:null,goal:null,open_questions:[],commitment_keys:[],last_event_id:null},current_person:null,facts:[],relationships:[],commitments:[],other_open_commitment_count:0};},
+    complete:unused,deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused
+  }});
+  try{
+    const result=await app.inject({url:'/owner/inspect-context?event_id='+event.id,headers:{authorization:`Bearer ${tokens.owner}`}});
+    assert.equal(result.statusCode,200);
+    const payload=result.json();
+    assert.equal(payload.turn_input.event.speaker_ref,'current_speaker');
+    assert.equal(JSON.stringify(payload).includes('private-external-id'),false);
+    assert.equal(JSON.stringify(payload).includes('secret persona'),false);
+    assert.equal(payload.diagnostics.reconstruction,'current_scoped_memory_for_selected_pending_event');
+    assert.equal(calls.includes('claim'),false);
+    assert.deepEqual(calls.sort(),['history','inspect','search','social','status']);
+  }finally{await app.close();}
+});

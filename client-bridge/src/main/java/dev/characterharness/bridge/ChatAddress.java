@@ -23,7 +23,15 @@ final class ChatAddress {
 
     static String extract(String signedContent, FilterMask filterMask, Pattern addressed) {
         if (signedContent == null || filterMask == null) return null;
+        String visible = visible(signedContent, filterMask);
+        return visible == null ? null : extract(visible, addressed);
+    }
+
+    static String visible(String signedContent, FilterMask filterMask) {
+        if (signedContent == null || filterMask == null) return null;
         Text visibleContent = filterMask.getFilteredText(signedContent);
-        return visibleContent == null ? null : extract(visibleContent.getString(), addressed);
+        if (visibleContent == null) return null;
+        String visible = visibleContent.getString().trim();
+        return visible.isEmpty() ? null : visible;
     }
 }
