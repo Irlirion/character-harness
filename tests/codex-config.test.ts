@@ -18,7 +18,9 @@ test('Codex enables dynamic tool dispatch while keeping other built-in features 
 });
 
 test('action guidance gates walking independently from camera turns', () => {
-  assert.match(CODEX_ACTION_INSTRUCTIONS,/walk only if on_ground=true, collision_ahead=false, and support_ahead=true/);
-  assert.match(CODEX_ACTION_INSTRUCTIONS,/Turning only changes the camera and does not require those walking checks/);
+  assert.match(CODEX_ACTION_INSTRUCTIONS,/A walk must start while on_ground=true, collision_ahead=false, and support_ahead=true/);
+  assert.match(CODEX_ACTION_INSTRUCTIONS,/lower of the player safe-fall attribute and a 3-block cap/);
+  assert.match(CODEX_ACTION_INSTRUCTIONS,/Never jump, fly, sprint, or walk across missing support/);
+  assert.match(CODEX_ACTION_INSTRUCTIONS,/Turning only changes the camera and does not require walking checks/);
   assert.match(CODEX_ACTION_INSTRUCTIONS,/if the bearing magnitude is greater than 90, turn 90 degrees/);
 });
