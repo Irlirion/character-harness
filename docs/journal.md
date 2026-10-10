@@ -115,3 +115,4 @@
 - Предложения Dependabot #8, #10 и #11 объединены для общей проверки: Gradle wrapper 9.8.0, JUnit Jupiter 6.1.3 и TypeScript 7.0.2. SHA256 distribution и wrapper JAR Gradle сверены с официальными значениями; TypeScript 7 проходит текущую конфигурацию без изменений исходного кода.
 - Обновления проверяются через Node/PostgreSQL и Java CI, CodeQL, Docker Node24 build и изолированную Java21-сборку bridge. Runtime остаётся Node 24/Java 21.
 - Новое предложение #20 с @types/node 26 не соответствует runtime Node 24. Major-обновления @types/node исключены в Dependabot; обычные обновления в линии 24 остаются доступны.
+- В общий набор включены появившиеся предложения #21–23: Codex 0.160.1, rate-limit 11.2.0 и Zod 4.6.5. Проверка типов и HTTP/MCP regression-тесты проверяют совместимость с Fastify 5 и текущими схемами; Java21-сборка и все 8 JUnit-тестов прошли.
