@@ -10,6 +10,19 @@ from main import AudioOutOfBounds, QwenVoice
 
 
 class QwenWavTest(unittest.TestCase):
+    def test_clone_uses_reference_and_russian_without_preset_speaker(self):
+        voice = QwenVoice.__new__(QwenVoice)
+        voice.reference = '/reference.wav'
+        voice.reference_text = 'Эталон.'
+        calls = []
+        voice.model = SimpleNamespace(generate=lambda **kw: calls.append(kw))
+        voice.chunks('Ильсур, привет!')
+        self.assertEqual(calls[0]['ref_audio'], '/reference.wav')
+        self.assertEqual(calls[0]['ref_text'], 'Эталон.')
+        self.assertEqual(calls[0]['lang_code'], 'Russian')
+        self.assertNotIn('voice', calls[0])
+        self.assertFalse(calls[0]['stream'])
+
     def voice(self, chunks):
         voice = QwenVoice.__new__(QwenVoice)
         voice.mx = SimpleNamespace(eval=lambda _: None)
@@ -28,7 +41,9 @@ class QwenWavTest(unittest.TestCase):
         with wave.open(io.BytesIO(buffer.getvalue())) as wav:
             self.assertEqual((wav.getnchannels(), wav.getsampwidth(), wav.getframerate()), (1, 2, 24000))
             samples = np.frombuffer(wav.readframes(wav.getnframes()), dtype='<i2')
-            np.testing.assert_array_equal(samples, [-32767, 0, 16383, 32767])
+            np.testing.assert_array_equal(samples[:4], [-32767, 0, 16383, 32767])
+            self.assertEqual(len(samples) - 4, 7200)
+            self.assertFalse(np.any(samples[4:]))
 
     def test_generation_stops_when_audio_exceeds_limit(self):
         voice = self.voice([self.chunk(np.zeros(24000 * 31))])

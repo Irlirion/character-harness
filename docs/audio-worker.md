@@ -12,7 +12,28 @@ swiftc native/audio/play.swift -o work/voice-spike/harness-audio-play
 docker compose up --build -d core
 ```
 
-### Qwen3-TTS 0.6B / Лада (Serena)
+### Голос Лады: русский Qwen3-TTS 1.7B
+
+С 2026-10-11 launcher использует `characters/Lada/voice.json`: локальный MLX 8bit
+файнтюн `siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf` (revision
+`c16b3af3db3095120efc1ebb73f6522442bcb3b1`) и `voice-reference.wav`.
+Эталон — выбранное пользователем демо Алёны Сазоновой: 6 секунд речи и 0,5 секунды
+тишины в конце. Текст эталона хранится в профиле. Модель должна лежать в
+`work/qwen-tts/lada/mlx-8bit`; веса не входят в Git. Для воспроизведения конвертации
+запустите `work/qwen-tts/.venv/bin/python scripts/prepare-lada-voice.py` после установки
+Python-зависимостей ниже. Нужны Metal GPU, доступ к Hugging Face и место для исходных
+и сконвертированных весов. `QWEN_VOICE_PROFILE` позволяет выбрать другой профиль;
+`QWEN_VOICE_PROFILE='' scripts/start-qwen-tts.sh` включает прежний CustomVoice.
+
+Сервис использует клонирование, `language=Russian`, temperature 0.7, до 650 токенов.
+Вводные фразы, обрезка начала и добавление ударений в запрос автоматически не выполняются.
+В конец каждого WAV добавляется 0,3 секунды тишины, входящей в общий лимит 30 секунд.
+В прослушивании пользователь предпочёл короткие предложения с тире для смысловой паузы.
+Файнтюн умеет следовать знакам U+0301, когда они присутствуют в тексте.
+Весь WAV генерируется до ответа HTTP; готовые голоса CustomVoice остаются доступны
+при прямом запуске `main.py` без `QWEN_VOICE_PROFILE`.
+
+### Предыдущая установка Qwen3-TTS 0.6B / Serena
 
 Qwen работает нативно на Apple Silicon через MLX, вне Docker. Проверенная установка: MacBook Pro M1 Pro с 16 GB памяти, macOS 27.0.1, Python 3.12 и `mlx==0.32.3`; совместимость с другими моделями Mac и версиями macOS отдельно не подтверждена. Постоянный процесс
 загружает `mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit` и прогревает модель
