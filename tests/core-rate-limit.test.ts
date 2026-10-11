@@ -135,3 +135,21 @@ test('bridge polling leaves event admission available and keeps its own bounded 
     assert.equal((await app.inject({ method: 'POST', url: '/bridge/actions/claim', headers, payload: {} })).statusCode, 429);
   } finally { await app.close(); await h.app.close(); }
 });
+
+
+test('reply polling and public chat claims have explicit shared-token limits before DB access',async()=>{
+  for (const route of [{method:'GET' as const,url:'/bridge/replies?chat=true',max:120},{method:'POST' as const,url:'/bridge/replies/00000000-0000-4000-8000-000000000001/claim-chat',max:60}]) {
+    const h=harness();
+    try {
+      for(let i=0;i<route.max;i++) {
+        const response=await h.app.inject({method:route.method,url:route.url,headers:{authorization:`Bearer ${tokens.bridge}`}});
+        assert.equal(response.statusCode,200);
+      }
+      const before=h.accesses();
+      const blocked=await h.app.inject({method:route.method,url:route.url,headers:{authorization:`Bearer ${tokens.bridge}`,'x-forwarded-for':'8.8.8.8'}});
+      assert.equal(blocked.statusCode,429);
+      assert.equal(h.accesses(),before);
+      assert.equal((await h.app.inject({method:'POST',url:'/audio/claim',headers:{authorization:`Bearer ${tokens.audio}`}})).statusCode,200);
+    }finally{await h.app.close();}
+  }
+});

@@ -64,7 +64,7 @@ while (!stopped) {
         return { content: [{ type: 'text', text: JSON.stringify(output) }], details: { mcp: output } };
       }
     }));
-    const finishTool:ToolDefinition={name:'turn_finish',label:'turn_finish',description:'Finish with a reply or explicit silence. Use exactly once as your last action.',parameters:{type:'object',properties:{decision:{type:'string',enum:['reply','silent']},text:{type:'string',minLength:1,maxLength:300}},required:['decision'],additionalProperties:false} as ToolDefinition['parameters'],execute:async(_callId,args)=>{
+    const finishTool:ToolDefinition={name:'turn_finish',label:'turn_finish',description:'Finish with a reply or explicit silence. Use exactly once as your last action.',parameters:{type:'object',properties:{decision:{type:'string',enum:['reply','silent']},text:{type:'string',minLength:1,maxLength:256},channel:{type:'string',enum:['voice','chat']}},required:['decision'],additionalProperties:false} as ToolDefinition['parameters'],execute:async(_callId,args)=>{
       if(finishDecision)throw new Error('turn_already_finished');
       finishDecision=TurnFinishDecisionSchema.parse(args);
       return {content:[{type:'text',text:finishDecision.decision==='silent'?'Turn finished silently.':'Reply accepted.'}],details:{decision:finishDecision.decision}};
@@ -93,7 +93,7 @@ while (!stopped) {
       if (!finishDecision) throw new Error('Turn did not call turn_finish');
       if (!stopped) await request('/engine/complete', finishDecision.decision==='silent'
         ?{event_id:input.event.id,epoch:input.character.epoch,decision:'silent'}
-        :{event_id:input.event.id,epoch:input.character.epoch,decision:'reply',text:finishDecision.text,speak:true});
+        :{event_id:input.event.id,epoch:input.character.epoch,decision:'reply',text:finishDecision.text,channel:finishDecision.channel});
     } finally { clearTimeout(deadline); session.dispose(); active = undefined; }
   } catch (error) {
     // No provider payloads, tokens, private messages or raw SDK errors in logs.

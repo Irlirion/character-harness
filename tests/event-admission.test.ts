@@ -14,7 +14,7 @@ test('PostgreSQL admission serializes concurrent writes, preserves replay, and c
   const event = (key: string, author = 'player') => ({ source_key: key, author_id: author, text: 'hi', author_provenance: 'owner_input', author_trust: 'unverified' as const });
   try {
     await admin.query(`CREATE SCHEMA ${schema}`);
-    for (const version of ['001-core', '002-speech', '003-bridge-delivery', '004-bridge-author-provenance', '005-event-admission', '005-client-actions', '006-voice-stt-provenance', '007-social-memory', '008-memory-staging']) {
+    for (const version of ['001-core', '002-speech', '003-bridge-delivery', '004-bridge-author-provenance', '005-event-admission', '005-client-actions', '006-voice-stt-provenance', '007-social-memory', '008-memory-staging','009-reply-channel']) {
       await pool.query(await readFile(new URL(`../migrations/${version}.sql`, import.meta.url), 'utf8'));
     }
     await pool.query("INSERT INTO characters(id,name,persona) VALUES('lada','test','test')");

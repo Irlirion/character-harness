@@ -127,6 +127,6 @@ export async function deferEvent(p: Principal, eventId: string, epoch?: number) 
     await db.query('COMMIT');return {deferred:true};
   }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
 }
-export async function complete(p: Principal, eventId: string, text: string | null, epoch: number, speak = false, delta?: SocialMemoryDelta, deltaDiagnostic?: string, rawDelta?: unknown, decision:'reply'|'silent'='reply') {
-  return completeEvent(pool, p, eventId, text, epoch, speak, delta, deltaDiagnostic, rawDelta, decision);
+export async function complete(p: Principal, eventId: string, text: string | null, epoch: number, speak = false, delta?: SocialMemoryDelta, deltaDiagnostic?: string, rawDelta?: unknown, decision:'reply'|'silent'='reply',channel:'local'|'voice'|'chat'=speak?'voice':'local') {
+  return completeEvent(pool, p, eventId, text, epoch, speak, delta, deltaDiagnostic, rawDelta, decision, channel);
 }
