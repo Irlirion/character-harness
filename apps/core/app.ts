@@ -204,7 +204,7 @@ app.post('/bridge/actions/:id', async req => {
   const b = z.object({claim_id:z.string().uuid(),state:z.enum(['completed','failed','cancelled']),evidence:evidenceSchema.optional()}).strict().parse(req.body);
   return finishClientAction(principal,id,b.claim_id,allowClientWorld?b.state:'cancelled',b.evidence ?? {});
 });
-app.get('/bridge/replies', async req => {
+app.get('/bridge/replies', {config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'bridge-replies'}}}, async req => {
   const query=z.object({chat:z.literal('true').optional()}).strict().parse(req.query);
   return (await pool.query(`SELECT e.id,e.author_id,r.text,r.channel
   FROM social_events e JOIN replies r ON r.event_id=e.id
@@ -213,7 +213,7 @@ app.get('/bridge/replies', async req => {
   ORDER BY e.created_at,e.id LIMIT 20`,[principal.characterId,principal.audienceId,query.chat==='true'])).rows;
 });
 // Claim public chat before sending: never replay a message after an ambiguous disconnect/crash.
-app.post('/bridge/replies/:id/claim-chat', async req => {
+app.post('/bridge/replies/:id/claim-chat', {config:{rateLimit:{max:60,timeWindow:'1 minute',keyGenerator:()=> 'bridge-chat-claims'}}}, async req => {
   const id=z.string().uuid().parse((req.params as {id:string}).id);
   const result=await pool.query(`UPDATE social_events e SET reply_delivered=true
     WHERE e.id=$1 AND e.character_id=$2 AND e.audience_id=$3 AND e.processed AND NOT e.reply_delivered
