@@ -1,0 +1,10 @@
+{
+  "model": "../../work/qwen-tts/lada/mlx-8bit",
+  "reference_audio": "voice-reference.wav",
+  "reference_text": "Меня зовут Алёна Сазонова и это моё демо. Вот так звучит мой голос в обычной жизни. Ну а дальше.",
+  "source": "https://domzvyka.ru/diktoryi/zhenskie-golosa/sazonova-alyona/",
+  "model_source": "siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf",
+  "model_revision": "c16b3af3db3095120efc1ebb73f6522442bcb3b1",
+  "reference_seconds": 6.5,
+  "trailing_silence_seconds": 0.5
+}
