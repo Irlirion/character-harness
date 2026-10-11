@@ -17,6 +17,7 @@ MAX_TEXT_CHARS = 300
 MAX_REQUEST_BYTES = 4096
 MAX_WAV_BYTES = 2_000_000
 MAX_AUDIO_SECONDS = 30
+TRAILING_SILENCE_SECONDS = 0.3
 
 
 class AudioOutOfBounds(ValueError):
@@ -33,9 +34,21 @@ class QwenVoice:
         from mlx_audio.tts.utils import load_model
 
         self.mx = mx
-        self.model = load_model(os.environ.get(
-            "QWEN_MODEL", "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit"
-        ))
+        self.reference = None
+        self.reference_text = None
+        profile_path = os.environ.get("QWEN_VOICE_PROFILE")
+        profile = {}
+        if profile_path:
+            path = Path(profile_path).resolve()
+            profile = json.loads(path.read_text(encoding="utf-8"))
+            self.reference = str((path.parent / profile["reference_audio"]).resolve())
+            self.reference_text = profile["reference_text"]
+            if not Path(self.reference).is_file() or not self.reference_text:
+                raise RuntimeError("qwen_reference_missing")
+            profile["model"] = str((path.parent / profile["model"]).resolve())
+        self.model = load_model(os.environ.get("QWEN_MODEL", profile.get(
+            "model", "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit"
+        )))
         self.speaker = os.environ.get("QWEN_VOICE", "Serena")
         self.config = SimpleNamespace(sample_rate=self.model.sample_rate)
         # Compile/evaluate kernels before publishing readiness.
@@ -44,6 +57,12 @@ class QwenVoice:
         mx.synchronize()
 
     def chunks(self, text):
+        if self.reference:
+            return self.model.generate(
+                text=text, lang_code="Russian", ref_audio=self.reference,
+                ref_text=self.reference_text, temperature=0.7,
+                stream=False, max_tokens=650,
+            )
         return self.model.generate(
             text=text, voice=self.speaker, lang_code="Russian", stream=True,
             streaming_interval=0.32, max_tokens=400,
@@ -62,9 +81,10 @@ class QwenVoice:
                 raise RuntimeError("qwen_sample_rate_changed")
             audio = np.asarray(chunk.audio).reshape(-1)
             samples += audio.size
-            if samples > self.config.sample_rate * MAX_AUDIO_SECONDS:
+            if samples > int(self.config.sample_rate * (MAX_AUDIO_SECONDS - TRAILING_SILENCE_SECONDS)):
                 raise AudioOutOfBounds()
             wav_file.writeframes((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
+        wav_file.writeframes(bytes(int(self.config.sample_rate * TRAILING_SILENCE_SECONDS) * 2))
 
 
 def load_configuration():
