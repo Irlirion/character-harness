@@ -6,7 +6,7 @@ import type { SocialMemoryDelta } from '../domain/social-memory.ts';
 import { applySocialMemoryDelta, loadStagedSocialMemory, type DeltaResult } from './social-memory.ts';
 
 /** Atomically stores a reply or silence, optional speech, a scoped memory proposal, and event completion. */
-export async function completeEvent(connectionPool: pg.Pool, p: Principal, eventId: string, text: string | null, epoch: number, speak = false, delta?: SocialMemoryDelta, deltaDiagnostic?: string, rawDelta?: unknown, decision: 'reply' | 'silent' = 'reply') {
+export async function completeEvent(connectionPool: pg.Pool, p: Principal, eventId: string, text: string | null, epoch: number, speak = false, delta?: SocialMemoryDelta, deltaDiagnostic?: string, rawDelta?: unknown, decision: 'reply' | 'silent' = 'reply', channel: 'local' | 'voice' | 'chat' = speak ? 'voice' : 'local') {
   const db = await connectionPool.connect();
   try {
     await db.query('BEGIN');
@@ -14,7 +14,8 @@ export async function completeEvent(connectionPool: pg.Pool, p: Principal, event
     if (!state) throw new DomainError('character_not_found');
     assertActive(state, epoch);
     if((decision==='reply'&&!text)||(decision==='silent'&&(text!==null||speak)))throw new DomainError('invalid_completion_decision');
-    const payload = decision==='silent' ? JSON.stringify({decision:'silent',memory_delta:rawDelta??null}) : JSON.stringify({text,speak,memory_delta:rawDelta??null});
+    if (decision==='reply' && ((channel==='voice')!==speak || (channel==='chat' && (text!.length>256 || /[\r\n\u0000-\u001f\u007f]/.test(text!) || text!.trimStart().startsWith('/'))))) throw new DomainError('invalid_reply_channel');
+    const payload = decision==='silent' ? JSON.stringify({decision:'silent',memory_delta:rawDelta??null}) : JSON.stringify({text,speak,...(channel==='chat'?{channel}:{}),memory_delta:rawDelta??null});
     const event = await db.query('SELECT id,processed,completion_payload,completion_memory_result FROM social_events WHERE id=$1 AND character_id=$2 AND audience_id=$3 FOR UPDATE',
       [eventId, p.characterId, p.audienceId]);
     if (!event.rowCount) throw new DomainError('event_not_found');
@@ -26,7 +27,7 @@ export async function completeEvent(connectionPool: pg.Pool, p: Principal, event
     }
     if(state.active_event_id!==eventId)throw new DomainError('turn_not_current');
     if (!state.lease_until || new Date(state.lease_until).getTime() <= Date.now()) throw new DomainError('lease_expired');
-    if(decision==='reply')await db.query('INSERT INTO replies(event_id,text) VALUES($1,$2) ON CONFLICT(event_id) DO NOTHING', [eventId, text]);
+    if(decision==='reply')await db.query('INSERT INTO replies(event_id,text,channel,epoch) VALUES($1,$2,$3,$4) ON CONFLICT(event_id) DO NOTHING', [eventId, text, channel, epoch]);
     if (speak) {
       if (text!.length > 300) throw new DomainError('speech_too_long');
       const active = await db.query("SELECT count(*)::int AS n FROM speech_jobs WHERE character_id=$1 AND state IN ('pending','claimed','playing') AND expires_at>now()", [p.characterId]);

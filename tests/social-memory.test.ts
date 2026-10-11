@@ -54,6 +54,13 @@ test('/engine/complete keeps legacy requests compatible and rejects malformed de
     const invalidSilent=await app.inject({method:'POST',url:'/engine/complete',headers,payload:{event_id,epoch:4,decision:'silent',text:'sentinel'}});
     assert.equal(invalidSilent.statusCode,400);
     assert.equal(calls.length,3);
+    for (const channel of ['chat','voice']) {
+      const response=await app.inject({method:'POST',url:'/engine/complete',headers,payload:{event_id,epoch:4,decision:'reply',text:'Привет',channel}});
+      assert.equal(response.statusCode,200);
+      assert.equal(calls.at(-1)[4],channel==='voice');
+      assert.equal(calls.at(-1)[9],channel);
+    }
+    assert.equal((await app.inject({method:'POST',url:'/engine/complete',headers,payload:{event_id,epoch:4,decision:'reply',text:'Привет',channel:'both'}})).statusCode,400);
   }finally{await app.close();}
 });
 
@@ -72,7 +79,7 @@ test('PostgreSQL completion commits reply with delta, rejects bad delta locally,
   const claim=(id:string)=>pool.query("UPDATE characters SET active_event_id=$1,lease_until=now()+interval '1 minute' WHERE id='lada'",[id]);
   try{
     await admin.query(`CREATE SCHEMA ${schema}`);
-    for(const version of ['001-core','002-speech','003-bridge-delivery','004-bridge-author-provenance','005-event-admission','005-client-actions','006-voice-stt-provenance','007-social-memory','008-memory-staging'])
+    for(const version of ['001-core','002-speech','003-bridge-delivery','004-bridge-author-provenance','005-event-admission','005-client-actions','006-voice-stt-provenance','007-social-memory','008-memory-staging','009-reply-channel'])
       await pool.query(await readFile(new URL(`../migrations/${version}.sql`,import.meta.url),'utf8'));
     await pool.query("INSERT INTO characters(id,name,persona,epoch) VALUES('lada','Lada','test',4)");
     await source(eventId,'owner:first');
@@ -233,6 +240,36 @@ test('PostgreSQL completion commits reply with delta, rejects bad delta locally,
     assert.deepEqual(silentPromiseResult.memory,{status:'rejected',reason:'commitment_reply_required',state_version:5});
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM social_commitments WHERE commitment_key='silent-promise'")).rows[0].n,0);
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM replies')).rows[0].n,13);
+    const chatEvent=randomUUID(); await source(chatEvent,'minecraft:channel-test'); await claim(chatEvent);
+    await completeEvent(pool,p,chatEvent,'Привет в общий чат',5,false,undefined,undefined,undefined,'reply','chat');
+    assert.equal((await pool.query('SELECT channel FROM replies WHERE event_id=$1',[chatEvent])).rows[0].channel,'chat');
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM speech_jobs WHERE request_id=$1',['reply:'+chatEvent])).rows[0].n,0);
+    assert.equal((await completeEvent(pool,p,chatEvent,'Привет в общий чат',5,false,undefined,undefined,undefined,'reply','chat')).replayed,true);
+    await assert.rejects(completeEvent(pool,p,chatEvent,'Привет в общий чат',5,true,undefined,undefined,undefined,'reply','voice'),/completion_conflict/);
+    const unused=async()=>{throw new Error('unused');};
+    const app=buildApp({principal:p,tokens,allowSystemChatPublicDemo:false,deps:{pool:{query:(...args:any[])=> (pool.query as any)(...args),end:async()=>{}},status:unused,search:unused,remember:unused,control:unused,ingest:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,enqueueClientAction:unused,clientActionStatus:unused,clientActionLease:unused,claimClientAction:unused,finishClientAction:unused,saveWorldObservation:unused,latestWorldObservation:unused,cancelClientActions:unused}});
+    try {
+      const headers={authorization:`Bearer ${tokens.bridge}`};
+      const oldClient=await app.inject({method:'GET',url:'/bridge/replies',headers});
+      assert.equal(oldClient.statusCode,200);
+      assert.ok(!oldClient.json().some((row:any)=>row.id===chatEvent));
+      const newClient=await app.inject({method:'GET',url:'/bridge/replies?chat=true',headers});
+      assert.equal(newClient.statusCode,200);
+      assert.ok(newClient.json().some((row:any)=>row.id===chatEvent && row.channel==='chat'));
+      const claimChat=()=>app.inject({method:'POST',url:`/bridge/replies/${chatEvent}/claim-chat`,headers,payload:{}});
+      await pool.query("UPDATE characters SET paused=true WHERE id='lada'");
+      assert.equal((await claimChat()).json().claimed,false);
+      await pool.query("UPDATE characters SET paused=false,epoch=6 WHERE id='lada'");
+      assert.equal((await claimChat()).json().claimed,false);
+      await pool.query("UPDATE characters SET epoch=5 WHERE id='lada'");
+      assert.equal((await claimChat()).json().claimed,true);
+      assert.equal((await claimChat()).json().claimed,false);
+      const voiceClaim=await app.inject({method:'POST',url:`/bridge/replies/${eventSpeech}/claim-chat`,headers,payload:{}});
+      assert.equal(voiceClaim.json().claimed,false);
+    } finally {await app.close();}
+    const commandEvent=randomUUID(); await source(commandEvent,'minecraft:command-test'); await claim(commandEvent);
+    await assert.rejects(completeEvent(pool,p,commandEvent,'/op someone',5,false,undefined,undefined,undefined,'reply','chat'),/invalid_reply_channel/);
+
   }finally{
     await pool.end();
     await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);

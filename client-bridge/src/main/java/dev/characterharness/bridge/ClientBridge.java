@@ -244,12 +244,13 @@ public final class ClientBridge implements ClientModInitializer {
 
     private void syncWorldSession(MinecraftClient client){
         String server=null;
-        boolean featureEnabled=config.observationEnabled()||config.actionsEnabled()||config.sttEnabled();
+        boolean featureEnabled=config.observationEnabled()||config.actionsEnabled()||config.sttEnabled()||config.systemChatEnabled();
         if(featureEnabled&&client.player!=null&&client.world!=null&&client.getNetworkHandler()!=null){
             try{String candidate=BridgeConfig.normalizeSystemChatServer(client.getCurrentServerEntry().address);
                 if((config.observationEnabled()&&candidate.equals(config.actionServer()))
                     ||(config.actionsEnabled()&&candidate.equals(config.actionServer()))
-                    ||(config.sttEnabled()&&candidate.equals(config.voiceServer())))server=candidate;
+                    ||(config.sttEnabled()&&candidate.equals(config.voiceServer()))
+                    ||(config.systemChatEnabled()&&candidate.equals(config.systemChatServer())))server=candidate;
             }catch(Exception ignored){}
         }
         actionServerEligible=config.actionsEnabled()&&server!=null&&server.equals(config.actionServer());
@@ -428,7 +429,7 @@ public final class ClientBridge implements ClientModInitializer {
 
     private void pollReplies() {
         try {
-            HttpResponse<String> response = request("GET", "/bridge/replies", null);
+            HttpResponse<String> response = request("GET", "/bridge/replies?chat=true", null);
             if (response.statusCode() != 200) return;
             JsonArray replies = JsonParser.parseString(response.body()).getAsJsonArray();
             for (int i = 0; i < replies.size(); i++) {
@@ -436,6 +437,24 @@ public final class ClientBridge implements ClientModInitializer {
                 String id = reply.get("id").getAsString();
                 String text = reply.get("text").getAsString();
                 if (text.isBlank() || text.length() > 300 || !queuedReplies.add(id)) continue;
+                String channel = reply.has("channel") ? reply.get("channel").getAsString() : "local";
+                if ("chat".equals(channel)) {
+                    String sessionId = activeWorldSessionId;
+                    if (sessionId == null || !PublicChatReply.valid(text)) { queuedReplies.remove(id); continue; }
+                    HttpResponse<String> claim = request("POST", "/bridge/replies/" + id + "/claim-chat", "{}");
+                    if (claim.statusCode()!=200 || !JsonParser.parseString(claim.body()).getAsJsonObject().get("claimed").getAsBoolean()) { queuedReplies.remove(id); continue; }
+                    MinecraftClient.getInstance().execute(() -> {
+                        try {
+                            MinecraftClient client = MinecraftClient.getInstance();
+                            if (client.player != null && client.getNetworkHandler() != null
+                                    && java.util.Objects.equals(sessionId, activeWorldSessionId)
+                                    && isAllowedVoiceServer(client.getCurrentServerEntry())) {
+                                client.getNetworkHandler().sendChatMessage(text);
+                            }
+                        } finally { queuedReplies.remove(id); }
+                    });
+                    continue;
+                }
                 recentlySpoken.put(normalizeSpeech(text),System.nanoTime());
                 MinecraftClient.getInstance().execute(() -> {
                     MinecraftClient client = MinecraftClient.getInstance();

@@ -28,7 +28,7 @@ export type CoreDeps = {
   inspectEvent?: (p: Principal, eventId?: string) => Promise<any>;
   stageMemory?: (p: Principal, eventId: string, epoch: number, invocationId: string, proposal: unknown) => Promise<any>;
   socialCommitmentPage?: (p:Principal,eventId:string,epoch:number,limit:number,offset:number)=>Promise<any>;
-  complete: (p: Principal, eventId: string, text: string | null, epoch: number, speak?: boolean, delta?: any, deltaDiagnostic?: string, rawDelta?: unknown, decision?: 'reply'|'silent') => Promise<any>;
+  complete: (p: Principal, eventId: string, text: string | null, epoch: number, speak?: boolean, delta?: any, deltaDiagnostic?: string, rawDelta?: unknown, decision?: 'reply'|'silent', channel?: 'local'|'voice'|'chat') => Promise<any>;
   deferEvent: (p: Principal, eventId: string, epoch?: number) => Promise<any>;
   enqueueSpeech: (p: Principal, requestId: string, text: string) => Promise<any>;
   claimSpeech: (p: Principal) => Promise<any>;
@@ -204,10 +204,25 @@ app.post('/bridge/actions/:id', async req => {
   const b = z.object({claim_id:z.string().uuid(),state:z.enum(['completed','failed','cancelled']),evidence:evidenceSchema.optional()}).strict().parse(req.body);
   return finishClientAction(principal,id,b.claim_id,allowClientWorld?b.state:'cancelled',b.evidence ?? {});
 });
-app.get('/bridge/replies', async () => (await pool.query(`SELECT e.id,e.author_id,r.text
+app.get('/bridge/replies', async req => {
+  const query=z.object({chat:z.literal('true').optional()}).strict().parse(req.query);
+  return (await pool.query(`SELECT e.id,e.author_id,r.text,r.channel
   FROM social_events e JOIN replies r ON r.event_id=e.id
   WHERE e.character_id=$1 AND e.audience_id=$2 AND (e.source_key LIKE 'minecraft:%' OR e.source_key LIKE 'minecraft-system:%' OR e.source_key LIKE 'minecraft-voice:%') AND NOT e.reply_delivered
-  ORDER BY e.created_at,e.id LIMIT 20`,[principal.characterId,principal.audienceId])).rows);
+  AND (r.channel<>'chat' OR ($3::boolean AND (r.created_at>now()-interval '60 seconds' AND EXISTS(SELECT 1 FROM characters c WHERE c.id=e.character_id AND NOT c.paused AND c.epoch=r.epoch))))
+  ORDER BY e.created_at,e.id LIMIT 20`,[principal.characterId,principal.audienceId,query.chat==='true'])).rows;
+});
+// Claim public chat before sending: never replay a message after an ambiguous disconnect/crash.
+app.post('/bridge/replies/:id/claim-chat', async req => {
+  const id=z.string().uuid().parse((req.params as {id:string}).id);
+  const result=await pool.query(`UPDATE social_events e SET reply_delivered=true
+    WHERE e.id=$1 AND e.character_id=$2 AND e.audience_id=$3 AND e.processed AND NOT e.reply_delivered
+    AND (e.source_key LIKE 'minecraft:%' OR e.source_key LIKE 'minecraft-system:%' OR e.source_key LIKE 'minecraft-voice:%')
+    AND EXISTS(SELECT 1 FROM replies r JOIN characters c ON c.id=e.character_id WHERE r.event_id=e.id AND r.channel='chat' AND r.created_at>now()-interval '60 seconds' AND NOT c.paused AND c.epoch=r.epoch)
+    AND EXISTS(SELECT 1 FROM characters c WHERE c.id=e.character_id AND NOT c.paused)
+    RETURNING e.id`,[id,principal.characterId,principal.audienceId]);
+  return {claimed:result.rowCount===1};
+});
 app.post('/bridge/replies/:id/ack', async req => {
   const id=z.string().uuid().parse((req.params as {id:string}).id);
   const result=await pool.query(`UPDATE social_events SET reply_delivered=true
@@ -240,13 +255,15 @@ app.post('/engine/defer', async req => {
 app.post('/engine/complete', async req => {
   const base={event_id:z.string().uuid(),epoch:z.number().int().positive(),memory_delta:z.unknown().optional()};
   const body=z.union([
+    z.object({...base,decision:z.literal('reply'),channel:z.enum(['voice','chat']),text:z.string().trim().min(1).max(256)}).strict(),
     z.object({...base,decision:z.literal('reply'),text:z.string().min(1).max(8000),speak:z.boolean().default(false)}).strict(),
     z.object({...base,decision:z.literal('silent')}).strict(),
     z.object({...base,text:z.string().min(1).max(8000),speak:z.boolean().default(false)}).strict()
   ]).parse(req.body);
   const decision='decision' in body?body.decision:'reply';
   const text='text' in body?body.text:null;
-  const speak=decision==='reply'&&'speak' in body?body.speak:false;
+  const channel='channel' in body?body.channel:undefined;
+  const speak=channel?channel==='voice':decision==='reply'&&'speak' in body?body.speak:false;
   let delta: ReturnType<typeof SocialMemoryDeltaSchema.parse> | undefined;
   let diagnostic: string | undefined;
   if (Object.hasOwn(body, 'memory_delta')) {
@@ -254,7 +271,7 @@ app.post('/engine/complete', async req => {
     if (parsed.success) delta = parsed.data;
     else diagnostic = 'schema_invalid';
   }
-  return complete(principal, body.event_id, text, body.epoch, speak, delta, diagnostic, body.memory_delta,decision);
+  return complete(principal, body.event_id, text, body.epoch, speak, delta, diagnostic, body.memory_delta,decision,channel);
 });
 function gateway(scope?: {eventId:string;epoch:number}) {
   const server = new McpServer({ name: 'character-harness', version: '0.1.0' });
