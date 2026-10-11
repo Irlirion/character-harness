@@ -69,11 +69,42 @@ test('updated MCP SDK works through the authenticated core and restricted HTTP c
     await client.connect(new StreamableHTTPClientTransport(new URL(base + '/mcp'), {
       fetch: coreFetch, requestInit: { headers: { Authorization: `Bearer ${tokens.engine}` } }
     }));
-    assert.deepEqual((await client.listTools()).tools.map(t => t.name).sort(), ['agent_action_status', 'agent_get_status', 'agent_observe', 'agent_turn', 'agent_walk', 'memory_propose', 'memory_search']);
+    assert.deepEqual((await client.listTools()).tools.map(t => t.name).sort(), ['agent_action_status', 'agent_get_status', 'agent_observe', 'agent_turn', 'agent_walk', 'memory_propose', 'memory_search', 'memory_social_list', 'memory_stage_delta']);
     const result = await client.callTool({ name: 'agent_get_status', arguments: {} });
     assert.equal(result.isError, undefined);
     assert.deepEqual(result.content, [{ type: 'text', text: '{"paused":false}' }]);
   } finally { await client.close(); await h.app.close(); }
+});
+
+test('MCP stage and obligation retrieval use trusted event/epoch headers',async()=>{
+  const calls:any[]=[];
+  const deps:CoreDeps={
+    pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},status:async()=>({paused:false}),search:async()=>[],remember:async()=>({}),
+    control:async()=>({}),ingest:async()=>({inserted:true,event_id:null}),nextEvent:async()=>null,recentConversation:async()=>[],complete:async()=>({}),deferEvent:async()=>({}),
+    stageMemory:async(...args:any[])=>{calls.push(['stage',...args]);return {staged:true,stage_version:1};},
+    socialCommitmentPage:async(...args:any[])=>{calls.push(['list',...args]);return {items:[],total:0,offset:0,limit:5};},
+    enqueueSpeech:async()=>({}),claimSpeech:async()=>null,speechState:async()=>null,updateSpeech:async()=>({}), enqueueClientAction:async()=>({}),clientActionStatus:async()=>({}),clientActionLease:async()=>({}),claimClientAction:async()=>null,finishClientAction:async()=>({}),saveWorldObservation:async()=>({}),latestWorldObservation:async()=>null,cancelClientActions:async()=>({})
+  };
+  const app=buildApp({principal,tokens,deps,allowSystemChatPublicDemo:false});
+  const client=new Client({name:'scope-test',version:'1'});
+  const eventId='11111111-1111-4111-8111-111111111111';
+  try{
+    const base=await app.listen({host:'127.0.0.1',port:0});
+    await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{fetch:coreFetch,requestInit:{headers:{Authorization:`Bearer ${tokens.engine}`,'X-Harness-Event':eventId,'X-Harness-Epoch':'17'}}}));
+    const listed=await client.callTool({name:'memory_social_list',arguments:{limit:5,offset:10}});
+    assert.equal(listed.isError,undefined);
+    const staged=await client.callTool({name:'memory_stage_delta',arguments:{invocation_id:'model-chosen',proposal:{person:{display_name:'Alex'},facts:[],relationships:[],commitments:[],working_state:null}}});
+    assert.equal(staged.isError,undefined);
+    assert.equal(calls[0][0],'list');
+    assert.equal(calls[0][2],eventId);assert.equal(calls[0][3],17);assert.equal(calls[0][4],5);assert.equal(calls[0][5],10);
+    assert.equal(calls[1][0],'stage');assert.equal(calls[1][2],eventId);assert.equal(calls[1][3],17);assert.equal(calls[1][4],'model-chosen');
+    const unscoped=new Client({name:'scope-test',version:'1'});
+    try{
+      await unscoped.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{fetch:coreFetch,requestInit:{headers:{Authorization:`Bearer ${tokens.engine}`}}}));
+      const denied=await unscoped.callTool({name:'memory_stage_delta',arguments:{invocation_id:'x',proposal:{facts:[{content:'x',confidence:0.5,epistemic_status:'inferred'}]}}});
+      assert.equal(denied.isError,true);
+    }finally{await unscoped.close();}
+  }finally{await client.close();await app.close();}
 });
 
 test('bridge polling leaves event admission available and keeps its own bounded budget', async () => {

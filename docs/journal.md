@@ -1,5 +1,34 @@
 # Журнал работы
 
+## 2026-10-10 — план социальной непрерывности
+
+- После сравнения с agent-workplace подготовлен `social-continuity-plan.md`: компактное состояние, отношения, обязательства, completion delta и просмотр контекста.
+- Первый сценарий — узнавание собеседника и продолжение разговорного обещания после перезапуска; самостоятельные wakeups выделены в следующий срез.
+- План предложен к реализации. Runtime, данные и рабочие контейнеры не менялись.
+
+## 2026-10-10 — социальная память, первый storage срез
+
+- Добавлены контракты `memory_delta` и ADR 0008: channel-scoped identities, sourced facts/relationship notes/commitments и aggregate working-state version.
+- Миграция 006 добавляет пять таблиц социальной памяти и сохраняет completion payload/result для replay detection. Миграция аддитивна.
+- `/engine/complete` принимает optional delta. Schema/provenance/scope/version reject остаются отдельными от успешного ответа; запись delta ограничена savepoint внутри общей completion transaction. Старый payload остаётся валиден.
+- Добавлены unit и PostgreSQL regression tests: savepoint rollback после частичной записи, reply сохраняется при memory rejection, scope/source/epoch и version fencing, commitments, channel isolation, speech queue rollback и replay dedup. Проверены в Node 24.21.0: `tsc --noEmit`, 59/59 tests, 0 skipped, включая обе PG integration suites на изолированной БД. Рабочие контейнеры и credentials не менялись.
+- Сборка контекста, новые engine adapters и live inference остаются следующими этапами.
+
+## 2026-10-10 — social memory в input и engine staging
+
+- Оба adapters теперь используют один bounded `turn_input` с audience-scoped facts, отношениями, открытыми обязательствами, provenance и aggregate version. Omitted commitments доступны через MCP `memory_social_list`; сырые внешние author IDs остаются только в доверенной стороне core.
+- Добавлены `memory_stage_delta`, общие `characters/memory-rules.md` и fencing active event/epoch. Stage привязан к текущему turn и применяется только в completion transaction; pause/defer/reclaim очищают черновики под character lock. Codex передаёт epoch при defer.
+- `/owner/inspect-context` показывает текущую реконструкцию pending event без claim, inference или persona. Добавлены HTTP/MCP и PostgreSQL roundtrip regressions для staging, immutable commitment origin/evidence, scope и inspection.
+- Миграция 007 требует перезапуска engine adapters при выкладке: старые in-flight events не имеют active event marker. Live inference не запускался.
+- Проверка завершена: Node 24.21.0 `tsc --noEmit`, полный suite 64/64 pass, 0 skipped, включая обе PostgreSQL integration suites на изолированной БД. Live inference не проверялся.
+
+## 2026-10-10 — полный Minecraft chat intake и typed silence
+
+- CHAT bridge пересылает все видимые signed user messages после filter mask и пропускает сообщения собственной учётной записи. GAME system parser принимает user text из pinned `<nickname>` формы только при прежнем explicit opt-in и public demo scope.
+- Оба adapters обязаны завершать модельный turn локальным typed `turn_finish`: естественный reply до 300 символов или explicit silence. Core атомарно завершает silent event, не создавая reply/speech; completion payload поддерживает replay conflict detection. Последние десять завершённых событий включают маркер наблюдаемого молчания.
+- Сохранены admission budgets 100 pending / 10 events per author per minute. Превышения отвергаются core и не ставятся в очередь; inference не запускается при отсутствии pending messages.
+- Добавлены Java parser, turn decision, HTTP и PostgreSQL tests. Node 24.21.0 `tsc --noEmit` и полный suite прошли: 66/66, 0 skipped, включая PG silent completion/sourced memory/replay regressions. Финальная Java21 Gradle build/test с cross-path dedup прошла: BUILD SUCCESSFUL, 9 задач выполнено. Live inference и новая политика в запущенной игре не проверялись.
+
 ## 2026-10-10 — Лада вместо Севера
 
 - Добавлен отдельный YAML-пакет интернет-персоны Лады с SCP, AI и тёплой иронией; финальный текст проверен отдельными модельными диалогами.

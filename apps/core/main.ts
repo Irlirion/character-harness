@@ -1,7 +1,8 @@
 import { buildApp } from './app.ts';
+import { readFile } from 'node:fs/promises';
 import { loadCharacter } from '../../packages/domain/character.ts';
 import { secret } from '../../packages/domain/secrets.ts';
-import { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent } from '../../packages/storage/db.ts';
+import { pool, status, search, remember, control, ingest, nextEvent, recentConversation, loadSocialContext, inspectEvent, stageMemory, socialCommitmentPage, complete, deferEvent } from '../../packages/storage/db.ts';
 import { enqueueSpeech, claimSpeech, speechState, updateSpeech } from '../../packages/storage/speech.ts';
 import { enqueueClientAction, clientActionStatus, clientActionLease, claimClientAction, finishClientAction, cancelActiveClientActions } from '../../packages/storage/actions.ts';
 import { saveWorldObservation, latestWorldObservation } from '../../packages/storage/observations.ts';
@@ -15,6 +16,8 @@ const bridgeToken = secret('BRIDGE_TOKEN');
 const systemChatDemoSetting = process.env.BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO ?? 'false';
 if (systemChatDemoSetting !== 'true' && systemChatDemoSetting !== 'false') throw new Error('BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO must be true or false');
 const allowSystemChatPublicDemo = systemChatDemoSetting === 'true';
+const memoryInstructions=await readFile(new URL('../../characters/memory-rules.md',import.meta.url),'utf8');
+const responseInstructions=await readFile(new URL('../../characters/social-response-rules.md',import.meta.url),'utf8');
 const clientWorldSetting = process.env.BRIDGE_CLIENT_WORLD_ENABLED ?? 'false';
 if (clientWorldSetting !== 'true' && clientWorldSetting !== 'false') throw new Error('BRIDGE_CLIENT_WORLD_ENABLED must be true or false');
 const allowClientWorld = clientWorldSetting === 'true';
@@ -27,9 +30,10 @@ await pool.query(`INSERT INTO characters(id,name,persona) VALUES($1,$2,$3)
 const app = buildApp({
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken },
   allowSystemChatPublicDemo, allowClientWorld,
-  deps: { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent,
-    enqueueSpeech, claimSpeech, speechState, updateSpeech, enqueueClientAction, clientActionStatus, clientActionLease, claimClientAction, finishClientAction,
-    saveWorldObservation,latestWorldObservation,cancelClientActions:cancelActiveClientActions }
+  memoryInstructions,
+  responseInstructions,
+  deps: { pool, status, search, remember, control, ingest, nextEvent, recentConversation, loadSocialMemory:loadSocialContext, inspectEvent, stageMemory, socialCommitmentPage, complete, deferEvent,
+    enqueueSpeech, claimSpeech, speechState, updateSpeech, enqueueClientAction, clientActionStatus, clientActionLease, claimClientAction, finishClientAction, saveWorldObservation, latestWorldObservation, cancelClientActions:cancelActiveClientActions }
 });
 const shutdown = async () => { await app.close(); await pool.end(); };
 process.once('SIGTERM', () => { void shutdown(); });

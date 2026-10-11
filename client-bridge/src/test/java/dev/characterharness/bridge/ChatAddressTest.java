@@ -22,10 +22,18 @@ class ChatAddressTest {
         for (int i = signedContent.indexOf("секрет"); i < signedContent.length(); i++) mask.markFiltered(i);
 
         assertEquals("######", ChatAddress.extract(signedContent, mask, ChatAddress.pattern("Лада")));
+        assertEquals("@Лада ######", ChatAddress.visible(signedContent, mask));
     }
 
     @Test
     void skipsFullyFilteredContent() {
         assertNull(ChatAddress.extract("@Лада секрет", FilterMask.FULLY_FILTERED, ChatAddress.pattern("Лада")));
+        assertNull(ChatAddress.visible("секрет", FilterMask.FULLY_FILTERED));
+    }
+
+    @Test
+    void visibleUserMessageDoesNotNeedCharacterMention() {
+        String message="  привет всем  ";
+        assertEquals("привет всем", ChatAddress.visible(message, new FilterMask(message.length())));
     }
 }
