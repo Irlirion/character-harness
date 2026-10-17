@@ -119,8 +119,8 @@ app.setErrorHandler((error, _req, reply) => {
 if(telegram)telegramRoutes(app,telegram);
 if(images){
  app.get('/owner/images',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},()=>images.status());
- app.post('/engine/images/claim',async()=>({job:await images.claim()}));
- app.post('/engine/images/:id/result',{bodyLimit:15_000_000},async req=>{
+ app.post('/engine/images/claim',{preHandler:app.rateLimit(),config:{rateLimit:{max:300,timeWindow:'1 minute',keyGenerator:()=> 'engine'}}},async()=>({job:await images.claim()}));
+ app.post('/engine/images/:id/result',{bodyLimit:15_000_000,preHandler:app.rateLimit(),config:{rateLimit:{max:300,timeWindow:'1 minute',keyGenerator:()=> 'engine'}}},async req=>{
   const id=z.string().uuid().parse((req.params as {id:string}).id);
   const b=z.object({claim_id:z.string().uuid(),state:z.enum(['generated','failed','unknown']),image:ImageSchema.optional()}).strict().parse(req.body);
   return images.finish(id,b.claim_id,b.state,b.image);
