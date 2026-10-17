@@ -2,8 +2,12 @@
 services:
   core:
     environment:
+      TELEGRAM_IMAGES_ENABLED: ${TELEGRAM_IMAGES_ENABLED:-false}
       TELEGRAM_WORKER_TOKEN_FILE: /run/secrets/telegram_worker_token
     secrets: [telegram_worker_token]
+  codex-engine:
+    environment:
+      TELEGRAM_IMAGES_ENABLED: ${TELEGRAM_IMAGES_ENABLED:-false}
   telegram:
     build: .
     profiles: [telegram]

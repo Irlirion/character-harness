@@ -14,7 +14,7 @@ export class CodexRpc {
   this.child.stderr.resume(); // Do not log provider/auth payloads.
   const lines=createInterface({input:this.child.stdout});
   lines.on('line',line=>{
-   if(line.length>2_000_000){this.close();return;}
+   if(line.length>20_000_000){this.close();return;}
    try{this.receive(JSON.parse(line));}catch{this.close();}
   });
   this.child.stdin.on('error',()=>this.fail());this.child.stdout.on('error',()=>this.fail());

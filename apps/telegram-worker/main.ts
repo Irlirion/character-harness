@@ -43,6 +43,7 @@ while(!stopped && !me) {
 }
 if(me) {
  const botId=String(me.id);
+ console.log(JSON.stringify({event:'telegram_started',bot_id:botId}));
  async function setState(state:string){await core('/telegram/state',{bot_id:botId,owner,state}).catch(()=>{});}
  async function poll() {
   let backoff=1000;
@@ -54,6 +55,7 @@ if(me) {
     await setState('connected');
     const updates=await bot.call('getUpdates',{offset:Number(lease.offset),timeout:25,limit:10,allowed_updates:['message','my_chat_member']});
     if(!updates.length)await core('/telegram/updates',{bot_id:botId,owner,updates:[]});
+    if(updates.length)console.log(JSON.stringify({event:'telegram_updates_received',count:updates.length}));
     for(const u of updates) {if(stopped)break;await core('/telegram/updates',{bot_id:botId,owner,updates:[envelope(u)]});}
     backoff=1000;
    }catch(e){
@@ -75,6 +77,7 @@ if(me) {
     if(!job){await sleep(1000);continue;}
     if(job.bot_id!==botId)throw new Error('bot_identity_mismatch');
     const outcome=await attemptDelivery(bot,job);
+    console.log(JSON.stringify({event:'telegram_delivery',job_id:job.id,kind:job.image?'photo':'text',state:outcome.state}));
     if(outcome.error_code==='unauthorized')await setState('auth_required');
     // If reporting fails, never resend. Core recovers the sending lease as unknown.
     await core(`/telegram/deliveries/${job.id}`,{claim_id:job.claim_id,...outcome});

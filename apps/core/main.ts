@@ -1,3 +1,4 @@
+import { ImageStore } from '../../packages/storage/images.ts';
 import { TelegramStore } from '../../packages/storage/telegram.ts';
 import { buildApp } from './app.ts';
 import { readFile } from 'node:fs/promises';
@@ -34,6 +35,7 @@ const telegram=telegramToken?new TelegramStore(pool,character.id):undefined;
 const app = buildApp({
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken,telegram:telegramToken },
   telegram,
+  images:telegram && process.env.TELEGRAM_IMAGES_ENABLED==='true'?new ImageStore(pool,character.id):undefined,
   allowSystemChatPublicDemo, allowClientWorld,
   memoryInstructions,
   responseInstructions,
