@@ -1,7 +1,7 @@
 export type RecentConversationTurn = {
   event_id: string;
   author_id: string;
-  author_provenance: 'legacy_unverified_input' | 'owner_input' | 'fabric_profile_context' | 'minecraft_system_chat' | 'minecraft_voice_stt';
+  author_provenance: 'legacy_unverified_input' | 'owner_input' | 'fabric_profile_context' | 'minecraft_system_chat' | 'minecraft_voice_stt' | 'telegram';
   author_trust: 'unverified';
   author_metadata?:Record<string,unknown>;
   input: string;

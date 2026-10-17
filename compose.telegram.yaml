@@ -1,0 +1,27 @@
+# Use together with compose.yaml; does not change the default Minecraft deployment.
+services:
+  core:
+    environment:
+      TELEGRAM_WORKER_TOKEN_FILE: /run/secrets/telegram_worker_token
+    secrets: [telegram_worker_token]
+  telegram:
+    build: .
+    profiles: [telegram]
+    command: [node, --experimental-strip-types, apps/telegram-worker/main.ts]
+    environment:
+      CORE_URL: http://core:3000
+      TELEGRAM_WORKER_TOKEN_FILE: /run/secrets/telegram_worker_token
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+    secrets: [telegram_worker_token, telegram_bot_token]
+    networks: [agent]
+    depends_on:
+      core: {condition: service_healthy}
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+secrets:
+  telegram_worker_token: {file: ./secrets/telegram_worker_token}
+  telegram_bot_token: {file: ./secrets/telegram_bot_token}

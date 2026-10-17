@@ -1,3 +1,5 @@
+import { telegramRoutes } from './telegram.ts';
+import type { TelegramStore } from '../../packages/storage/telegram.ts';
 import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -14,7 +16,7 @@ import { isObservationTimeCurrent, worldObservationSchema } from '../../packages
 import { SYSTEM_CHAT_SERVER } from '../../packages/domain/bridge-event.ts';
 import type { WorldObservation } from '../../packages/domain/world-observation.ts';
 
-export type CoreTokens = { engine: string; owner: string; audio: string; bridge: string };
+export type CoreTokens = { engine: string; owner: string; audio: string; bridge: string; telegram?:string };
 export type CoreDeps = {
   pool: { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number | null }>; end: () => Promise<void> };
   status: (p: Principal) => Promise<any>;
@@ -49,6 +51,7 @@ export type BuildAppOptions = {
   allowSystemChatPublicDemo: boolean;
   allowClientWorld?: boolean;
   deps: CoreDeps;
+  telegram?:TelegramStore;
   memoryInstructions?: string;
   responseInstructions?: string;
 };
@@ -58,14 +61,14 @@ function emptySocialContext(): SocialContextInput {
 }
 
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
-export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps, memoryInstructions = '', responseInstructions = '' }: BuildAppOptions): FastifyInstance {
+export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps, memoryInstructions = '', responseInstructions = '', telegram }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 // Roles share a token, so budget by role rather than IP or attacker-supplied headers.
 // Audio and action leases poll frequently; keep bridge event ingestion in its own budget.
 function rateBudget(path: string) {
   if (path === '/bridge/events') return { key: 'bridge-events', max: 180 };
   const role = requiredRole(path) ?? 'owner';
-  return { key: role, max: { audio: 600, engine: 300, bridge: 900, owner: 120 }[role] };
+  return { key: role, max: { audio: 600, engine: 300, bridge: 900, owner: 120, telegram:600 }[role] };
 }
 app.register(rateLimit, {
   hook: 'preHandler', timeWindow: '1 minute',
@@ -97,7 +100,7 @@ app.addHook('onRequest', async (req, reply) => {
   // Derive the required token from the resolved path, never from the raw request target:
   // an unmatched path has no role and must not fall back to the engine token.
   const role = requiredRole(path);
-  const required = role === 'owner' ? ownerToken : role === 'audio' ? audioToken : role === 'bridge' ? bridgeToken : role === 'engine' ? engineToken : null;
+  const required = role === 'owner' ? ownerToken : role === 'audio' ? audioToken : role === 'bridge' ? bridgeToken : role === 'engine' ? engineToken : role === 'telegram' ? tokens.telegram??null : null;
   if (required === null || !matchesToken(req.headers.authorization, required)) return reply.code(401).send({ error: 'unauthorized' });
 });
 app.setErrorHandler((error, _req, reply) => {
@@ -110,10 +113,12 @@ app.setErrorHandler((error, _req, reply) => {
   app.log.error({ name: error instanceof Error ? error.name : 'unknown' }, 'Request failed');
   return reply.code(500).send({ error: 'internal_error' });
 });
+if(telegram)telegramRoutes(app,telegram);
 app.get('/health', async () => ({ alive: true }));
 app.get('/ready', async () => { await pool.query('SELECT 1'); return { ready: true }; });
 app.get('/engine/status', async () => status(principal));
-app.get('/owner/status', async () => ({ character: await status(principal), audience: principal.audienceId, adapters: { minecraft: 'not_implemented', telegram: 'not_implemented', voice: 'not_implemented' } }));
+// The global handler runs first to retain the shared role budget; route config also exposes the limit to static analysis.
+app.get('/owner/status', {preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}}, async () => ({ character: await status(principal), audience: principal.audienceId, adapters: { minecraft: 'not_implemented', telegram: telegram?await telegram.overview():'not_implemented', voice: 'not_implemented' } }));
 app.get('/owner/inspect-context', async req => {
   if (!deps.inspectEvent) throw new DomainError('context_inspection_unavailable');
   const query=z.object({event_id:z.string().uuid().optional()}).strict().parse(req.query);
@@ -236,23 +241,30 @@ app.get('/owner/replies', async () => (await pool.query(`SELECT e.id,e.author_id
   WHERE e.character_id=$1 AND e.audience_id=$2 ORDER BY e.created_at DESC LIMIT 20`, [principal.characterId, principal.audienceId])).rows);
 app.get('/engine/input', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store');
+  if(telegram)await telegram.prepare();
   const event = await nextEvent(principal);
   const state = await status(principal);
   const currentEvent = state.paused ? null : event;
-  const recent_conversation = currentEvent ? await recentConversation(principal, currentEvent.id) : [];
-  const memories=await search(principal,'');
-  const social_memory=currentEvent?boundSocialContext(deps.loadSocialMemory?await deps.loadSocialMemory(principal,currentEvent):emptySocialContext()):undefined;
-  const world_observation=currentEvent?await currentWorldObservation():undefined;
+  const scoped=currentEvent?.audience_id?{...principal,audienceId:currentEvent.audience_id}:principal;
+  const recent_conversation = currentEvent ? await recentConversation(scoped, currentEvent.id) : [];
+  const memories=await search(scoped,'');
+  const social_memory=currentEvent?boundSocialContext(deps.loadSocialMemory?await deps.loadSocialMemory(scoped,currentEvent):emptySocialContext()):undefined;
+  const world_observation=currentEvent&&currentEvent.channel!=='telegram'?await currentWorldObservation():undefined;
   const turn_input=currentEvent?makeTurnInput(currentEvent,memories,recent_conversation,world_observation,social_memory):null;
-  return { character: state, audience_id: principal.audienceId,
+  return { character: state, audience_id: scoped.audienceId,
     event: currentEvent, memories, recent_conversation, social_memory, world_observation, turn_input, memory_instructions:memoryInstructions,response_instructions:responseInstructions };
 });
 app.get('/engine/observation',async()=>currentWorldObservation());
 app.post('/engine/defer', async req => {
   const body=z.object({event_id:z.string().uuid(),epoch:z.number().int().positive().optional()}).strict().parse(req.body);
-  return deps.deferEvent(principal, body.event_id, body.epoch);
+  const scoped=telegram&&body.epoch?await telegram.scope(body.event_id,body.epoch):principal;
+  return deps.deferEvent(scoped, body.event_id, body.epoch);
 });
 app.post('/engine/complete', async req => {
+  if(telegram && (req.body as any)?.channel==='telegram') {
+    const b=z.object({channel:z.literal('telegram'),event_id:z.string().uuid(),epoch:z.number().int().positive(),decision:z.enum(['reply','silence']),text:z.string().min(1).max(2000).optional()}).strict().parse(req.body);
+    return telegram.finish(b.event_id,b.epoch,b.decision,b.text);
+  }
   const base={event_id:z.string().uuid(),epoch:z.number().int().positive(),memory_delta:z.unknown().optional()};
   const body=z.union([
     z.object({...base,decision:z.literal('reply'),channel:z.enum(['voice','chat']),text:z.string().trim().min(1).max(256)}).strict(),
@@ -273,18 +285,20 @@ app.post('/engine/complete', async req => {
   }
   return complete(principal, body.event_id, text, body.epoch, speak, delta, diagnostic, body.memory_delta,decision,channel);
 });
-function gateway(scope?: {eventId:string;epoch:number}) {
+function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Principal=principal,isTelegram=false,guard:()=>Promise<unknown>=async()=>{}) {
   const server = new McpServer({ name: 'character-harness', version: '0.1.0' });
+  const originalRegister=server.registerTool.bind(server);
+  server.registerTool=((name:any,config:any,callback:any)=>originalRegister(name,config,async(...args:any[])=>{await guard();return callback(...args);})) as typeof server.registerTool;
   const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }] });
   server.registerTool('agent_get_status', { description: 'Read current character status', inputSchema: {} }, async () => result(await status(principal)));
-  server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map. nearest_support_block_id/drop are diagnostic; support_ahead confirms a loaded collision top within the lesser of the effective player safe-fall distance and 3 blocks.',inputSchema:{}},async()=>result(await currentWorldObservation()));
-  server.registerTool('memory_search', { description: 'Search only the current character and audience memory', inputSchema: { query: z.string().max(200).default('') } }, async ({ query }) => result(await search(principal, query)));
+  if(!isTelegram) server.registerTool('agent_observe',{description:'Read a compact bounded local client snapshot. It may be stale and is not server-authoritative or a full world map. nearest_support_block_id/drop are diagnostic; support_ahead confirms a loaded collision top within the lesser of the effective player safe-fall distance and 3 blocks.',inputSchema:{}},async()=>result(await currentWorldObservation()));
+  server.registerTool('memory_search', { description: 'Search only the current character and audience memory', inputSchema: { query: z.string().max(200).default('') } }, async ({ query }) => result(await search(scopedPrincipal, query)));
   server.registerTool('memory_stage_delta', {
     description: 'Stage one complete sourced memory proposal for this active turn. A later call replaces the earlier staged proposal. Core supplies participant identity, source, audience, epoch, and version. Never include the proposal in your reply.',
     inputSchema: { invocation_id: z.string().min(1).max(200), proposal: SocialMemoryProposalSchema }
   }, async ({invocation_id,proposal}) => {
     if(!scope||!deps.stageMemory)return {...result({error:'turn_scope_missing'}),isError:true};
-    try{return result(await deps.stageMemory(principal,scope.eventId,scope.epoch,invocation_id,proposal));}
+    try{return result(await deps.stageMemory(scopedPrincipal,scope.eventId,scope.epoch,invocation_id,proposal));}
     catch(error){if(error instanceof DomainError)return {...result({error:error.code}),isError:true};throw error;}
   });
   server.registerTool('memory_social_list', {
@@ -292,20 +306,20 @@ function gateway(scope?: {eventId:string;epoch:number}) {
     inputSchema:{limit:z.number().int().min(1).max(25).default(10),offset:z.number().int().min(0).max(500).default(0)}
   },async({limit,offset})=>{
     if(!scope||!deps.socialCommitmentPage)return {...result({error:'turn_scope_missing'}),isError:true};
-    try{return result(await deps.socialCommitmentPage(principal,scope.eventId,scope.epoch,limit,offset));}
+    try{return result(await deps.socialCommitmentPage(scopedPrincipal,scope.eventId,scope.epoch,limit,offset));}
     catch(error){if(error instanceof DomainError)return {...result({error:error.code}),isError:true};throw error;}
   });
   server.registerTool('memory_propose', {
     description: 'Save a personal, unverified note for this audience; do not save secrets or treat guesses as facts',
     inputSchema: { text: z.string().min(1).max(2000), invocation_id: z.string().min(1).max(200), epoch: z.number().int().positive() }
   }, async ({ text, invocation_id, epoch }) => {
-    try { return result(await remember(principal, text, invocation_id, epoch)); }
+    try { return result(await remember(scopedPrincipal, text, invocation_id, epoch)); }
     catch (error) {
       if (!(error instanceof DomainError)) throw error;
       return { ...result({ error: error.code }), isError: true };
     }
   });
-  server.registerTool('agent_walk', {
+  if(!isTelegram) server.registerTool('agent_walk', {
     description: 'Walk briefly using normal client movement keys. Start only while grounded. forward is -1 backward, 0 neutral, 1 forward; strafe is -1 left, 0 neutral, 1 right. Both axes may be combined. A controlled downward step may briefly be airborne only while descending toward confirmed loaded support within the lesser of effective safe fall distance and 3 blocks. Never jump, sprint, break blocks, or interact. This queues an action; use agent_action_status and claim success only after state=completed. Maximum 1200 ms.',
     inputSchema: { forward:z.number().int().min(-1).max(1), strafe:z.number().int().min(-1).max(1), duration_ms:z.number().int().min(100).max(1200), invocation_id:z.string().min(1).max(200), expected_epoch:z.number().int().positive() }
   }, async ({forward,strafe,duration_ms,invocation_id,expected_epoch}) => {
@@ -314,7 +328,7 @@ function gateway(scope?: {eventId:string;epoch:number}) {
     try { return result(await enqueueClientAction(principal,invocation_id,'walk',{forward,strafe},duration_ms,expected_epoch)); }
     catch (error) { if (!(error instanceof DomainError)) throw error; return { ...result({error:error.code}), isError:true }; }
   });
-  server.registerTool('agent_turn', {
+  if(!isTelegram) server.registerTool('agent_turn', {
     description: 'Turn the local character camera by a small relative yaw/pitch; this does not require grounded/support/collision checks (those gate walking only). Positive Minecraft yaw turns west; negative yaw turns east. Use a nearby player bearing_degrees as the relative yaw target. Maximum per call is 90 degrees yaw and 30 degrees pitch; if the target bearing exceeds that, turn by 90 degrees toward the target, observe again, then turn the remainder. This queues an action; use agent_action_status and only say it succeeded after state=completed. No teleport or chat commands.',
     inputSchema: { yaw_degrees:z.number().min(-90).max(90), pitch_degrees:z.number().min(-30).max(30), invocation_id:z.string().min(1).max(200), expected_epoch:z.number().int().positive() }
   }, async ({yaw_degrees,pitch_degrees,invocation_id,expected_epoch}) => {
@@ -323,20 +337,31 @@ function gateway(scope?: {eventId:string;epoch:number}) {
     try { return result(await enqueueClientAction(principal,invocation_id,'turn',{yaw_degrees,pitch_degrees},0,expected_epoch)); }
     catch (error) { if (!(error instanceof DomainError)) throw error; return { ...result({error:error.code}), isError:true }; }
   });
-  server.registerTool('agent_action_status', {
+  if(!isTelegram) server.registerTool('agent_action_status', {
     description:'Read the status and local client evidence for one of your previously queued walk/turn operations. For blocked walking, explain step_status, obstacle_block_id/estimated_step_up, and nearest_support_block_id/drop when present; these are bounded diagnostics, not permission to step over a block. A walk that expires while airborne is cancelled, never reported completed. The crosshair target is not necessarily the obstacle. Only state=completed proves it succeeded.',
     inputSchema:{id:z.string().uuid()}
   }, async ({id}) => {
     try { const current=await clientActionStatus(principal,id);return result(allowClientWorld?current:{...current,allowed:false}); }
     catch (error) { if (!(error instanceof DomainError)) throw error; return { ...result({error:error.code}), isError:true }; }
   });
+  if(isTelegram && telegram)server.registerTool('telegram_read_history',{
+    description:'Read the bounded local journal of this chat only; history may be incomplete.',
+    inputSchema:{limit:z.number().int().min(1).max(20).default(20),before:z.string().regex(/^\d+$/).max(18).optional()}
+  },async({before,limit})=>result(await telegram.history(scopedPrincipal,before,limit)));
   return server;
 }
 app.post('/mcp', async (req, reply) => {
   const eventId=typeof req.headers['x-harness-event']==='string'?req.headers['x-harness-event']:undefined;
   const epochHeader=typeof req.headers['x-harness-epoch']==='string'?req.headers['x-harness-epoch']:undefined;
   const scope=eventId&&z.string().uuid().safeParse(eventId).success&&epochHeader&&/^\d+$/.test(epochHeader)?{eventId,epoch:Number(epochHeader)}:undefined;
-  const server = gateway(scope);
+  let scopedPrincipal:Principal=principal;let isTelegram=false;
+  let guard:()=>Promise<unknown>=async()=>{};
+  if(telegram){
+    if(!scope)throw new DomainError('turn_scope_missing');
+    const current=await telegram.scope(scope.eventId,scope.epoch);scopedPrincipal=current;isTelegram=current.channel==='telegram';
+    guard=()=>telegram.scope(scope.eventId,scope.epoch);
+  }
+  const server = gateway(scope,scopedPrincipal,isTelegram,guard);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   reply.hijack();
   reply.raw.on('close', () => { void transport.close(); void server.close(); });
