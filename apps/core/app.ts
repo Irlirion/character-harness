@@ -117,7 +117,8 @@ if(telegram)telegramRoutes(app,telegram);
 app.get('/health', async () => ({ alive: true }));
 app.get('/ready', async () => { await pool.query('SELECT 1'); return { ready: true }; });
 app.get('/engine/status', async () => status(principal));
-app.get('/owner/status', {preHandler:app.rateLimit()}, async () => ({ character: await status(principal), audience: principal.audienceId, adapters: { minecraft: 'not_implemented', telegram: telegram?await telegram.overview():'not_implemented', voice: 'not_implemented' } }));
+// The global handler runs first to retain the shared role budget; route config also exposes the limit to static analysis.
+app.get('/owner/status', {preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}}, async () => ({ character: await status(principal), audience: principal.audienceId, adapters: { minecraft: 'not_implemented', telegram: telegram?await telegram.overview():'not_implemented', voice: 'not_implemented' } }));
 app.get('/owner/inspect-context', async req => {
   if (!deps.inspectEvent) throw new DomainError('context_inspection_unavailable');
   const query=z.object({event_id:z.string().uuid().optional()}).strict().parse(req.query);
