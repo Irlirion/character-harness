@@ -164,6 +164,29 @@ test('Telegram PostgreSQL and HTTP contracts', {skip:!process.env.TEST_DATABASE_
    assert.equal((await storage.loadSocialContext({...p,audienceId:g.audience_id},g)).working_state?.topic,'Знакомство');
    assert.equal((await pool.query('SELECT count(*)::int n FROM replies WHERE event_id=$1',[g.id])).rows[0].n,0);
   });
+  await t.test('upgrade from standalone Telegram preserves chat journal and adds social memory',async()=>{
+   const legacySchema=`legacy_${randomUUID().replaceAll('-','')}`;
+   await admin.query(`CREATE SCHEMA ${legacySchema}`);
+   const legacyUrl=new URL(process.env.TEST_DATABASE_URL!);legacyUrl.searchParams.set('options',`-c search_path=${legacySchema}`);
+   const legacy=new pg.Pool({connectionString:legacyUrl.toString()});
+   try {
+    const migration=async(name:string)=>legacy.query(await readFile(new URL(`../migrations/${name}.sql`,import.meta.url),'utf8'));
+    for(const name of ['001-core','002-speech','003-bridge-delivery','004-bridge-author-provenance','005-event-admission','005-client-actions','006-voice-stt-provenance'])await migration(name);
+    await legacy.query('ALTER TABLE characters ADD COLUMN active_event_id uuid REFERENCES social_events(id)');
+    const telegramSql=await readFile(new URL('../migrations/010-telegram.sql',import.meta.url),'utf8');
+    await legacy.query(telegramSql.split('ALTER TABLE replies DROP CONSTRAINT')[0]);
+    await legacy.query("INSERT INTO characters(id,name,persona) VALUES('lada','Лада','test')");
+    await legacy.query("INSERT INTO telegram_accounts(bot_id,character_id,username) VALUES('99','lada','LadaBot')");
+    const bid=randomUUID();
+    await legacy.query("INSERT INTO telegram_bindings(id,bot_id,character_id,chat_id,audience_id,kind) VALUES($1,'99','lada','8','legacy-private','private')",[bid]);
+    await legacy.query("INSERT INTO telegram_messages(binding_id,message_id,author_id,text,consumed) VALUES($1,'1','telegram:8','Сохранённая история',true)",[bid]);
+    for(const name of ['007-social-memory','008-memory-staging','009-reply-channel','010-telegram'])await migration(name);
+    await migration('010-telegram');
+    const upgraded=new TelegramStore(legacy,'lada');
+    assert.equal((await upgraded.history({characterId:'lada',audienceId:'legacy-private'})).messages[0].text,'Сохранённая история');
+    assert.equal((await legacy.query('SELECT count(*)::int n FROM social_people')).rows[0].n,0);
+   } finally {await legacy.end();await admin.query(`DROP SCHEMA ${legacySchema} CASCADE`);}
+  });
   await t.test('HTTP roles, Telegram context, tool catalog and server-side audience isolation',async()=>{
    await reset();const b=await store.bind('99','8','private',true);await store.ingest('99',owner,[message()]);
    await pool.query(`INSERT INTO memories(id,character_id,audience_id,text,source) VALUES($1,'lada','demo-public','PRIVATE_MINECRAFT_SECRET','test'),($2,'lada',$3,'TELEGRAM_NOTE','test')`,[randomUUID(),randomUUID(),b.audience_id]);

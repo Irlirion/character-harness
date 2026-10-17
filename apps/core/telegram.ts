@@ -5,7 +5,7 @@ import type { TelegramStore } from '../../packages/storage/telegram.ts';
 export function telegramRoutes(app:FastifyInstance,store:TelegramStore) {
   const numeric=z.string().regex(/^\d+$/).max(30);
   const chat=z.string().regex(/^-?\d+$/).max(30);
-  app.get('/owner/telegram',()=>store.overview());
+  app.get('/owner/telegram',{config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},()=>store.overview());
   app.post('/owner/telegram/bindings',async req=>{
     const b=z.object({bot_id:numeric,chat_id:chat,kind:z.enum(['private','group']),enabled:z.boolean().default(true)}).strict().parse(req.body);
     return store.bind(b.bot_id,b.chat_id,b.kind,b.enabled);
