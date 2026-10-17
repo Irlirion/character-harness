@@ -173,7 +173,7 @@ export class TelegramStore {
       if(allowed) {
         await db.query("INSERT INTO replies(event_id,text,channel,epoch) VALUES($1,$2,'telegram',$3) ON CONFLICT DO NOTHING",[eventId,text,epoch]);
         await db.query(`INSERT INTO telegram_outbox(id,event_id,binding_id,revision,text,reply_to,direct,state,expires_at)
-          VALUES($1,$2,$3,$4,$5,$6,$7,'pending',$8) ON CONFLICT(event_id) DO NOTHING`,[randomUUID(),eventId,d.binding_id,d.revision,text,d.reply_to,d.direct,d.turn_expires_at]);
+          VALUES($1,$2,$3,$4,$5,$6,$7,'pending',$8) ON CONFLICT(event_id) WHERE image_job_id IS NULL DO NOTHING`,[randomUUID(),eventId,d.binding_id,d.revision,text,d.reply_to,d.direct,d.turn_expires_at]);
       }
       await db.query('UPDATE telegram_decisions SET outcome=$2,completion_epoch=$3,completion_payload=$4 WHERE event_id=$1',[eventId,allowed?'reply':'silence',epoch,JSON.stringify({decision,text})]);
       const p={characterId:this.characterId,audienceId:d.audience_id};
@@ -206,7 +206,8 @@ export class TelegramStore {
         WHERE b.character_id=$1 AND b.enabled AND a.status='connected' AND (a.retry_at IS NULL OR a.retry_at<=now()) AND o.state IN ('pending','retry_wait')
         AND (o.retry_at IS NULL OR o.retry_at<=now()) ORDER BY o.created_at LIMIT 20`,[this.characterId])).rows;
       for(const job of jobs) {
-        if(!job.direct && !await this.initiativeAllowed(db,job.binding_id,job.id)) {
+        const sameReply=job.image_job_id && (await db.query("SELECT 1 FROM telegram_outbox WHERE event_id=$1 AND image_job_id IS NULL AND state IN ('pending','sending','sent','retry_wait')",[job.event_id])).rowCount;
+        if(!job.direct && !sameReply && !await this.initiativeAllowed(db,job.binding_id,job.id)) {
           await db.query("UPDATE telegram_outbox SET state='cancelled',error_code='initiative_budget' WHERE id=$1",[job.id]);continue;
         }
         const count=(await db.query(`SELECT count(*)::int AS total,count(*) FILTER(WHERE binding_id=$2)::int AS local FROM telegram_outbox
@@ -214,7 +215,7 @@ export class TelegramStore {
         if(count.total>=20 || count.local>=5) continue;
         const claimId=randomUUID();
         await db.query("UPDATE telegram_outbox SET state='sending',claim_id=$2,lease_until=now()+interval '30 seconds',send_started_at=now() WHERE id=$1",[job.id,claimId]);
-        return {id:job.id,claim_id:claimId,bot_id:job.bot_id,chat_id:job.chat_id,text:job.text,reply_to:job.reply_to};
+        return {id:job.id,claim_id:claimId,bot_id:job.bot_id,chat_id:job.chat_id,text:job.text,reply_to:job.reply_to,...(job.image_data?{image:job.image_data.toString('base64')}: {})};
       }
       return null;
     });

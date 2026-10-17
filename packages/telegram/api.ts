@@ -10,11 +10,19 @@ export class BotApi {
     this.token=token;this.transport=transport;
     if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) throw new Error('invalid_bot_token');
   }
-  async call(method:'getMe'|'getWebhookInfo'|'getUpdates'|'sendMessage', body:Record<string,unknown>={}):Promise<any> {
+  async call(method:'getMe'|'getWebhookInfo'|'getUpdates'|'sendMessage'|'sendPhoto', body:Record<string,unknown>={}):Promise<any> {
+    let payload:BodyInit=JSON.stringify(body);let headers:Record<string,string>|undefined={'Content-Type':'application/json'};
+    if(method==='sendPhoto'){
+      if(!(body.photo instanceof Uint8Array))throw new BotApiError('rejected');
+      const form=new FormData();
+      form.set('photo',new Blob([new Uint8Array(body.photo)],{type:body.photo[0]===137?'image/png':'image/jpeg'}),'lada-image.'+(body.photo[0]===137?'png':'jpg'));
+      for(const [key,value] of Object.entries(body))if(key!=='photo'&&value!==undefined)form.set(key,typeof value==='object'?JSON.stringify(value):String(value));
+      payload=form;headers=undefined;
+    }
     let response:Response;
     try { response = await this.transport(`https://api.telegram.org/bot${this.token}/${method}`, {
-      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),
-      signal:AbortSignal.timeout(method==='getUpdates'?35000:15000), redirect:'error'
+      method:'POST',headers,body:payload,
+      signal:AbortSignal.timeout(method==='getUpdates'?35000:method==='sendPhoto'?20000:15000), redirect:'error'
     }); } catch { throw new BotApiError('unknown'); }
     let data:any; try { data=await response.json(); } catch { throw new BotApiError('unknown'); }
     if (response.ok && data?.ok === true) return data.result;

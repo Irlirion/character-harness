@@ -1,3 +1,5 @@
+import type { ImageStore } from '../../packages/storage/images.ts';
+import { ImageSchema } from '../../packages/images/domain.ts';
 import { telegramRoutes } from './telegram.ts';
 import type { TelegramStore } from '../../packages/storage/telegram.ts';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -52,6 +54,7 @@ export type BuildAppOptions = {
   allowClientWorld?: boolean;
   deps: CoreDeps;
   telegram?:TelegramStore;
+  images?:ImageStore;
   memoryInstructions?: string;
   responseInstructions?: string;
 };
@@ -61,7 +64,7 @@ function emptySocialContext(): SocialContextInput {
 }
 
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
-export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps, memoryInstructions = '', responseInstructions = '', telegram }: BuildAppOptions): FastifyInstance {
+export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps, memoryInstructions = '', responseInstructions = '', telegram, images }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 // Roles share a token, so budget by role rather than IP or attacker-supplied headers.
 // Audio and action leases poll frequently; keep bridge event ingestion in its own budget.
@@ -114,6 +117,15 @@ app.setErrorHandler((error, _req, reply) => {
   return reply.code(500).send({ error: 'internal_error' });
 });
 if(telegram)telegramRoutes(app,telegram);
+if(images){
+ app.get('/owner/images',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},()=>images.status());
+ app.post('/engine/images/claim',async()=>({job:await images.claim()}));
+ app.post('/engine/images/:id/result',{bodyLimit:15_000_000},async req=>{
+  const id=z.string().uuid().parse((req.params as {id:string}).id);
+  const b=z.object({claim_id:z.string().uuid(),state:z.enum(['generated','failed','unknown']),image:ImageSchema.optional()}).strict().parse(req.body);
+  return images.finish(id,b.claim_id,b.state,b.image);
+ });
+}
 app.get('/health', async () => ({ alive: true }));
 app.get('/ready', async () => { await pool.query('SELECT 1'); return { ready: true }; });
 app.get('/engine/status', async () => status(principal));
@@ -344,6 +356,13 @@ function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Principal
     try { const current=await clientActionStatus(principal,id);return result(allowClientWorld?current:{...current,allowed:false}); }
     catch (error) { if (!(error instanceof DomainError)) throw error; return { ...result({error:error.code}), isError:true }; }
   });
+  if(isTelegram && images && scope){
+   server.registerTool('image_generation_status',{description:'Read shared image job usage and this chat image job status. Counts are job starts, not a hard limit on native tool calls.',inputSchema:{}},async()=>result(await images.status(scopedPrincipal)));
+   server.registerTool('image_generate',{description:'Queue one image as a reply to this conversation. You choose the prompt. Generation and Telegram delivery happen asynchronously; queued is not completed. Do not retry failed or unknown jobs.',inputSchema:{prompt:z.string().trim().min(1).max(1500),caption:z.string().max(500).default('')}},async({prompt,caption})=>{
+    try{return result(await images.queue(scopedPrincipal,scope.eventId,scope.epoch,prompt,caption));}
+    catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
+   });
+  }
   if(isTelegram && telegram)server.registerTool('telegram_read_history',{
     description:'Read the bounded local journal of this chat only; history may be incomplete.',
     inputSchema:{limit:z.number().int().min(1).max(20).default(20),before:z.string().regex(/^\d+$/).max(18).optional()}
