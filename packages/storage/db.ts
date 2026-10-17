@@ -57,6 +57,11 @@ export async function control(p: Principal, paused: boolean) {
     const current=(await db.query('SELECT id,active_event_id FROM characters WHERE id=$1 FOR UPDATE',[p.characterId])).rows[0];
     if(!current)throw new DomainError('character_not_found');
     const rows=(await db.query('UPDATE characters SET paused=$2, epoch=epoch+1, lease_until=NULL,active_event_id=NULL WHERE id=$1 RETURNING paused,epoch',[p.characterId,paused])).rows;
+    if(paused){
+      await db.query("UPDATE telegram_outbox SET state='cancelled' WHERE binding_id IN (SELECT id FROM telegram_bindings WHERE character_id=$1) AND state IN ('pending','retry_wait')",[p.characterId]);
+      await db.query("UPDATE social_events SET processed=true WHERE character_id=$1 AND channel='telegram' AND NOT processed",[p.characterId]);
+      await db.query('UPDATE telegram_messages SET consumed=true WHERE binding_id IN (SELECT id FROM telegram_bindings WHERE character_id=$1)',[p.characterId]);
+    }
     if(current.active_event_id)await db.query('DELETE FROM social_memory_staging WHERE event_id=$1',[current.active_event_id]);
     await db.query('COMMIT');return rows[0];
   } catch(error){await db.query('ROLLBACK');throw error;} finally{db.release();}
@@ -64,7 +69,7 @@ export async function control(p: Principal, paused: boolean) {
 export async function ingest(p: Principal, event: SocialEvent) {
   return ingestEvent(pool, p, event);
 }
-export async function nextEvent(p: Principal) {
+export async function nextEvent(p: Principal, telegram=false) {
   const db = await pool.connect();
   try {
     await db.query('BEGIN');
@@ -72,10 +77,10 @@ export async function nextEvent(p: Principal) {
     if (!state || state.paused || (state.lease_until && new Date(state.lease_until).getTime() > Date.now())) {
       await db.query('COMMIT'); return null;
     }
-    if(state.active_event_id)await db.query('DELETE FROM social_memory_staging WHERE character_id=$1 AND audience_id=$2 AND event_id=$3',[p.characterId,p.audienceId,state.active_event_id]);
-    const event = (await db.query(`SELECT id,author_id,author_provenance,author_trust,author_metadata,text,reply_to,source_key FROM social_events
-      WHERE character_id=$1 AND audience_id=$2 AND NOT processed AND attempts<3 ORDER BY created_at,id LIMIT 1`,
-      [p.characterId,p.audienceId])).rows[0];
+    if(state.active_event_id)await db.query('DELETE FROM social_memory_staging WHERE character_id=$1 AND event_id=$2',[p.characterId,state.active_event_id]);
+    const event = (await db.query(`SELECT id,audience_id,channel,author_id,author_provenance,author_trust,author_metadata,text,reply_to,source_key FROM social_events
+      WHERE character_id=$1 AND (audience_id=$2 OR ($3 AND channel='telegram' AND turn_expires_at>now() AND EXISTS(SELECT 1 FROM telegram_bindings b WHERE b.audience_id=social_events.audience_id AND b.enabled))) AND NOT processed AND attempts<3 ORDER BY created_at,id LIMIT 1`,
+      [p.characterId,p.audienceId,telegram])).rows[0];
     if (event) {
       await db.query('UPDATE social_events SET attempts=attempts+1 WHERE id=$1', [event.id]);
       const claimed=(await db.query("UPDATE characters SET epoch=epoch+1,lease_until=now()+interval '2 minutes',active_event_id=$2 WHERE id=$1 RETURNING epoch", [p.characterId,event.id])).rows[0];

@@ -1,4 +1,4 @@
-ALTER TABLE characters ADD COLUMN active_event_id uuid REFERENCES social_events(id);
+ALTER TABLE characters ADD COLUMN IF NOT EXISTS active_event_id uuid REFERENCES social_events(id);
 CREATE TABLE social_memory_staging (
   character_id text NOT NULL REFERENCES characters(id),
   audience_id text NOT NULL,

@@ -1,3 +1,4 @@
+import { TelegramStore } from '../../packages/storage/telegram.ts';
 import { buildApp } from './app.ts';
 import { readFile } from 'node:fs/promises';
 import { loadCharacter } from '../../packages/domain/character.ts';
@@ -27,12 +28,16 @@ if (engineToken.length < 32 || ownerToken.length < 32 || engineToken === ownerTo
 await pool.query(`INSERT INTO characters(id,name,persona) VALUES($1,$2,$3)
   ON CONFLICT(id) DO UPDATE SET name=excluded.name,persona=excluded.persona`, [character.id, character.name, character.persona]);
 
+const telegramToken=process.env.TELEGRAM_WORKER_TOKEN_FILE || process.env.TELEGRAM_WORKER_TOKEN ? secret('TELEGRAM_WORKER_TOKEN') : undefined;
+if(telegramToken && (telegramToken.length<32 || new Set([telegramToken,engineToken,ownerToken,audioToken,bridgeToken]).size!==5)) throw new Error('Distinct Telegram worker token required');
+const telegram=telegramToken?new TelegramStore(pool,character.id):undefined;
 const app = buildApp({
-  principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken },
+  principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken,telegram:telegramToken },
+  telegram,
   allowSystemChatPublicDemo, allowClientWorld,
   memoryInstructions,
   responseInstructions,
-  deps: { pool, status, search, remember, control, ingest, nextEvent, recentConversation, loadSocialMemory:loadSocialContext, inspectEvent, stageMemory, socialCommitmentPage, complete, deferEvent,
+  deps: { pool, status, search, remember, control, ingest, nextEvent:p=>nextEvent(p,!!telegram), recentConversation, loadSocialMemory:loadSocialContext, inspectEvent, stageMemory, socialCommitmentPage, complete, deferEvent,
     enqueueSpeech, claimSpeech, speechState, updateSpeech, enqueueClientAction, clientActionStatus, clientActionLease, claimClientAction, finishClientAction, saveWorldObservation, latestWorldObservation, cancelClientActions:cancelActiveClientActions }
 });
 const shutdown = async () => { await app.close(); await pool.end(); };
