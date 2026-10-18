@@ -1,6 +1,7 @@
 import { runtimeOwnerRoutes, runtimeEngineRoutes, type RuntimeOwnerStore, type RuntimeEngineStore, type RuntimePlanningPolicy } from './runtime.ts';
 import type { ImageStore } from '../../packages/storage/images.ts';
 import { ImageSchema } from '../../packages/images/domain.ts';
+import {directedErrorDetail} from '../../packages/storage/telegram-directed.ts';
 import { telegramRoutes } from './telegram.ts';
 import type { TelegramStore } from '../../packages/storage/telegram.ts';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -372,7 +373,7 @@ async function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Pri
   }
   if(isTelegram&&telegram&&scope&&await telegram.canSendGroup(scopedPrincipal,scope.eventId,scope.epoch)){
    server.registerTool('telegram_send_group',{description:'Send one short message to the single configured group on this verified private owner request, expressed in ordinary language. Choose useful text from the request/current context; no slash command required. Never copy private context unless owner requested that disclosure. Queued is not sent. Call telegram_group_delivery and confirm only state=sent. No arbitrary recipient. One message per owner event.',inputSchema:{text:z.string().trim().min(1).max(1000)}},async({text})=>{
-    try{return result(await telegram.sendGroup(scopedPrincipal,scope.eventId,scope.epoch,text));}catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
+    try{return result(await telegram.sendGroup(scopedPrincipal,scope.eventId,scope.epoch,text));}catch(e){if(e instanceof DomainError)return {...result(directedErrorDetail(e)),isError:true};throw e;}
    });
    server.registerTool('telegram_group_delivery',{description:'Check a group send requested from this private owner chat. Only sent confirms actual Telegram acceptance. Pending/retry_wait means queued, unknown means do not retry, failed/cancelled/expired means not sent.',inputSchema:{id:z.uuid()}},async({id})=>{
     try{return result(await telegram.groupDelivery(scopedPrincipal,scope.eventId,scope.epoch,id));}catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}

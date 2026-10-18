@@ -5,6 +5,14 @@ import {z} from 'zod';
 import {DomainError,type Principal} from '../domain/policy.ts';
 import {fingerprint,reviewContent,type ContentReviewer} from '../runtime/policy.ts';
 import {currentProfile,profileUsable,writePolicyAudit} from './runtime-authorization.ts';
+export class DirectedReviewError extends DomainError {
+ readonly rule_id:string;
+ constructor(code:string,ruleId:string){super(code);this.rule_id=ruleId;}
+}
+export function directedErrorDetail(e:DomainError){
+ return {error:e.code,...(e instanceof DirectedReviewError?{rule_id:e.rule_id}:{}),
+  ...(e.code==='directed_recipient_unclear'?{reason:'Не удалось однозначно понять, кого поздравить или кому адресовать текст. Уточни человека; подключённая группа уже выбрана.'}:{})};
+}
 export type DirectedReviewer={reviewer:ContentReviewer;timeoutMs:number};
 
 /** Explicit owner delegation from natural language. Recipient is selected by the server. */
@@ -24,7 +32,15 @@ export class DirectedTelegram {
   if(targets.length!==1)throw new DomainError('directed_group_unavailable');
   const history=(await db.query(`SELECT e.text,r.text AS reply FROM social_events e LEFT JOIN replies r ON r.event_id=e.id
    WHERE e.character_id=$1 AND e.audience_id=$2 AND e.processed AND (e.created_at,e.id)<($3,$4) ORDER BY e.created_at DESC,e.id DESC LIMIT 4`,[p.characterId,p.audienceId,source.created_at,source.id])).rows;
-  return {source,history:history.map(h=>({text:h.text.slice(0,1200),reply:h.reply?.slice(0,500)??null})),target:targets[0]};
+  // Delivery receipts provide evidence of the ongoing relay, not new authority.
+  // Only this owner chat, current source/target revisions and recent confirmed sends qualify.
+  const delivered=(await db.query(`SELECT e.text AS owner_request,r.text AS sent_text,o.send_started_at AS sent_at
+   FROM telegram_directed_requests r JOIN social_events e ON e.id=r.source_event_id JOIN telegram_outbox o ON o.id=r.outbox_id
+   WHERE r.source_binding_id=$1 AND r.source_revision=$2 AND r.target_binding_id=$3 AND r.target_revision=$4
+   AND o.state='sent' AND o.send_started_at>clock_timestamp()-interval '30 minutes'
+   AND (e.created_at,e.id)<($5,$6) ORDER BY e.created_at DESC,e.id DESC LIMIT 2`,
+   [source.binding_id,source.revision,targets[0].id,targets[0].revision,source.created_at,source.id])).rows.reverse();
+  return {source,delivered:delivered.map(d=>({owner_request:d.owner_request.slice(0,600),sent_text:d.sent_text,sent_at:new Date(d.sent_at).toISOString()})),history:history.map(h=>({text:h.text.slice(0,1200),reply:h.reply?.slice(0,500)??null})),target:targets[0]};
  }
  async available(p:Principal,eventId:string,epoch:number){
   if(!this.review)return false;
@@ -39,9 +55,9 @@ export class DirectedTelegram {
   const text=z.string().trim().min(1).max(1000).parse(input);
   const context=await this.context(this.pool,p,eventId,epoch),old=await this.receipt(this.pool,eventId,text);if(old)return old;
   const current=await currentProfile(this.pool,p);if(!this.review||!current||!profileUsable(current.profile,Date.now()))throw new DomainError('runtime_policy_blocked');
-  const payload={operation:'owner_directed_group_message',current_owner_request:context.source.text,recent_private_context:context.history,target:'single_configured_group',text};
+  const payload={operation:'owner_directed_group_message',current_owner_request:context.source.text,recent_private_context:context.history,recent_confirmed_group_deliveries:context.delivered,target:'single_configured_group',text};
   const review=await reviewContent(current.profile,'output',payload,this.review.reviewer,this.review.timeoutMs);
-  if(review.verdict!=='allow'){await writePolicyAudit(this.pool,p,null,'output',review);throw new DomainError(review.verdict==='needs_review'?'directed_review_unavailable':'directed_content_blocked');}
+  if(review.verdict!=='allow'){await writePolicyAudit(this.pool,p,null,'output',review);throw new DirectedReviewError(review.verdict==='needs_review'&&/ambiguous|unclear|recipient/.test(review.rule_id)?'directed_recipient_unclear':review.verdict==='needs_review'?'directed_review_unavailable':'directed_content_blocked',review.rule_id);}
   const db=await this.pool.connect();try{
    await db.query('BEGIN');await db.query('SELECT id FROM characters WHERE id=$1 FOR UPDATE',[p.characterId]);
    const fresh=await this.context(db,p,eventId,epoch),profile=await currentProfile(db,p);

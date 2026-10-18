@@ -1,6 +1,8 @@
+import {DirectedReviewError,directedErrorDetail} from '../packages/storage/telegram-directed.ts';
 import {buildApp} from '../apps/core/app.ts';
 import test from 'node:test';import assert from 'node:assert/strict';import pg from 'pg';import {randomUUID} from 'node:crypto';import {readFile,readdir} from 'node:fs/promises';
 import {TelegramStore} from '../packages/storage/telegram.ts';import {RuntimeAuthorizationStore} from '../packages/storage/runtime-authorization.ts';import {testProfile,allowTestReviewer} from './fixtures/runtime-policy.ts';
+test('ambiguous addressee is reported distinctly from unavailable delivery',()=>{assert.deepEqual(directedErrorDetail(new DirectedReviewError('directed_recipient_unclear','owner_request_ambiguous_recipient')),{error:'directed_recipient_unclear',rule_id:'owner_request_ambiguous_recipient',reason:'Не удалось однозначно понять, кого поздравить или кому адресовать текст. Уточни человека; подключённая группа уже выбрана.'});});
 const p={characterId:'lada',audienceId:'demo-public'};
 test('natural-language private owner group sends are reviewed, scoped and durable',{skip:!process.env.TEST_DATABASE_URL},async t=>{
  const schema='directed_'+randomUUID().replaceAll('-',''),admin=new pg.Pool({connectionString:process.env.TEST_DATABASE_URL});let db:pg.Pool|undefined;
@@ -26,6 +28,21 @@ test('natural-language private owner group sends are reviewed, scoped and durabl
    const job=await tg.claim('99',owner);assert.ok(job);assert.equal(job.chat_id,'-42');assert.equal(job.reply_to,null);
    await tg.delivered(job.id,job.claim_id,'sent','701');assert.equal((await tg.groupDelivery(scope(),e.id,e.epoch,a.id))!.state,'sent');
    await tg.finish(e.id,e.epoch,'reply','Написала в группу.');
+  });
+  await t.test('follow-up review receives confirmed same-group relay and resolves the previous addressee',async()=>{
+   await reset();const first=await event('Напиши в группу Ильсуру');await tg.sendGroup(scope(),first.id,first.epoch,'Ильсур, привет!');const job=await tg.claim('99',owner);await tg.delivered(job!.id,job!.claim_id,'sent','710');await tg.finish(first.id,first.epoch,'reply','Написала Ильсуру в группу.');const ack=await tg.claim('99',owner);await tg.delivered(ack!.id,ack!.claim_id,'sent','712');
+   const second=await event('Поздравь его с наступающим хелуином');await tg.sendGroup(scope(),second.id,second.epoch,'Ильсур, с наступающим Хеллоуином!');
+   const checked=reviews.at(-1);assert.ok(checked.current_owner_request.includes('Поздравь его'));
+   assert.equal(checked.recent_confirmed_group_deliveries.length,1);assert.ok(checked.recent_confirmed_group_deliveries[0].owner_request.includes('Ильсуру'));assert.equal(checked.recent_confirmed_group_deliveries[0].sent_text,'Ильсур, привет!');
+   assert.equal(checked.target,'single_configured_group');const next=await tg.claim('99',owner);assert.equal(next!.chat_id,'-42');
+  });
+  await t.test('unconfirmed, old and reconfigured-group sends cannot become confirmed follow-up context',async()=>{
+   for(const kind of ['unknown','old','reconfigured']){
+    await reset();const first=await event('Напиши в группу Ильсуру');await tg.sendGroup(scope(),first.id,first.epoch,'Ильсур, привет!');const job=await tg.claim('99',owner);await tg.delivered(job!.id,job!.claim_id,kind==='unknown'?'unknown':'sent',kind==='unknown'?undefined:'711');await tg.finish(first.id,first.epoch,'reply','Обработала поручение.');
+    if(kind==='old')await pool.query("UPDATE telegram_outbox SET send_started_at=now()-interval '31 minutes' WHERE id=$1",[job!.id]);
+    if(kind==='reconfigured'){await tg.bind('99','-42','group',false);await tg.bind('99','-42','group',true);}
+    const second=await event('Поздравь его');await tg.sendGroup(scope(),second.id,second.epoch,'С праздником!');assert.equal(reviews.at(-1).recent_confirmed_group_deliveries.length,0);
+   }
   });
   await t.test('private owner MCP exposes send/status and executes the ordinary dialogue tool path',async()=>{
    await reset();const e=await event();const tokens={engine:'e'.repeat(64),owner:'o'.repeat(64),audio:'a'.repeat(64),bridge:'b'.repeat(64),telegram:'t'.repeat(64)};

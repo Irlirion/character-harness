@@ -87,3 +87,12 @@ normal Telegram delivery rate limits and moderation/reviewer budgets still apply
 `telegram_group_delivery` can confirm `sent` only after a real worker acknowledgment.
 Unknown outcomes never cause automatic resend. The private response must distinguish
 queued, sent, failed and unknown. No other channel/tool authority is added.
+
+Follow-up directives (for example, “поздравь его” after a named group message) may
+continue the current exchange without repeating the person/group. Review receives the
+last two confirmed sends from the same private owner binding and same target group
+revision within 30 minutes, including original requests and actual sent text. A named
+addressee inside that group is not a new chat recipient. Receipts are contextual evidence;
+a current directive is still required, and unrelated greetings/questions are not sends.
+Ambiguous-addressee errors are reported with a concrete clarification instead of claiming
+that Telegram is unavailable. No stored failed message is automatically replayed.
