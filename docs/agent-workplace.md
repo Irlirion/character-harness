@@ -69,3 +69,21 @@ compartment. Shared material does not confer tools or change recipient permissio
 scheduling, budgets or other policies. Migration 017 is additive. For rollback to 016,
 stop the runtime consumer, retain common desk data and restore the prior policy/image;
 legacy scoped desks remain intact. A v4 policy expressly authorizes shared safe notes.
+
+## Ordinary private owner requests (migration 018)
+
+The verified private owner may ask naturally to send a group message, without slash
+commands. `telegram_send_group` is supplied only in that owner's active private turn
+with runtime control, usable policy/reviewer and exactly one configured enabled group.
+The server chooses the group. The exact proposed text, current owner request and bounded
+recent private context are reviewed together for explicit delegation and permitted
+cross-channel disclosure. Quoted/history instructions alone are not authority.
+
+An atomic receipt and outbox permit at most one group post per source event. Repeated
+calls return that same delivery; changed text is rejected. Before dispatch, both bindings,
+owner delegation, revisions, policy and text hash are rechecked. An explicit owner request
+is separate from unsolicited initiative and does not use its two-per-day/quiet-hour gates;
+normal Telegram delivery rate limits and moderation/reviewer budgets still apply.
+`telegram_group_delivery` can confirm `sent` only after a real worker acknowledgment.
+Unknown outcomes never cause automatic resend. The private response must distinguish
+queued, sent, failed and unknown. No other channel/tool authority is added.

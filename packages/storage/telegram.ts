@@ -1,3 +1,4 @@
+import {DirectedTelegram,type DirectedReviewer} from './telegram-directed.ts';
 import {configureAutonomy} from './workplace.ts';
 import {handleRuntimeCommand,runtimeCommand,runtimeDeliveryValid} from '../telegram/runtime-commands.ts';
 import type {RuntimeStore} from './runtime.ts';
@@ -14,7 +15,11 @@ export class TelegramStore {
   private pool:pg.Pool;
   readonly characterId:string;
   private runtime?:RuntimeStore;
-  constructor(pool:pg.Pool, characterId:string,runtime?:RuntimeStore) {this.pool=pool;this.characterId=characterId;this.runtime=runtime;}
+  constructor(pool:pg.Pool, characterId:string,runtime?:RuntimeStore,review?:DirectedReviewer) {this.pool=pool;this.characterId=characterId;this.runtime=runtime;this.directed=new DirectedTelegram(pool,characterId,review);}
+  private directed:DirectedTelegram;
+  async canSendGroup(p:Principal,eventId:string,epoch:number){return this.directed.available(p,eventId,epoch);}
+  async sendGroup(p:Principal,eventId:string,epoch:number,text:string){return this.directed.send(p,eventId,epoch,text);}
+  async groupDelivery(p:Principal,eventId:string,epoch:number,id:string){return this.directed.status(p,eventId,epoch,id);}
   private async tx<T>(fn:(db:DB, character:any)=>Promise<T>):Promise<T> {
     const db=await this.pool.connect();
     try {

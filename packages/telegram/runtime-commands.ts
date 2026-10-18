@@ -1,3 +1,4 @@
+import {directedDeliveryValid} from '../storage/telegram-directed.ts';
 import {initiativeDeliveryValid,configureAutonomy,deskContext} from '../storage/workplace.ts';
 import type pg from 'pg';
 import {z} from 'zod';
@@ -73,6 +74,7 @@ export async function handleRuntimeCommand(db:pg.PoolClient,store:RuntimeStore,b
 function label(s:string){return ({ready:'в очереди',running:'планирует',waiting_time:'ожидает времени',needs_input:'нужен твой ответ',completed:'завершена',failed:'остановлена',cancelled:'отменена'} as Record<string,string>)[s]??s;}
 
 export async function runtimeDeliveryValid(db:pg.PoolClient,job:any){
+ if(job.directed_source_event)return directedDeliveryValid(db,job);
  if(!job.runtime_activity_id)return true;
  if(job.autonomy_revision&&!await initiativeDeliveryValid(db,job))return false;
  if(secretDetected(job.text)||fingerprint(job.text)!==job.runtime_text_hash)return false;

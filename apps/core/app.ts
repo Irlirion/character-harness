@@ -304,7 +304,7 @@ app.post('/engine/complete', async req => {
   }
   return complete(principal, body.event_id, text, body.epoch, speak, delta, diagnostic, body.memory_delta,decision,channel);
 });
-function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Principal=principal,isTelegram=false,guard:()=>Promise<unknown>=async()=>{}) {
+async function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Principal=principal,isTelegram=false,guard:()=>Promise<unknown>=async()=>{}) {
   const server = new McpServer({ name: 'character-harness', version: '0.1.0' });
   const originalRegister=server.registerTool.bind(server);
   server.registerTool=((name:any,config:any,callback:any)=>originalRegister(name,config,async(...args:any[])=>{await guard();return callback(...args);})) as typeof server.registerTool;
@@ -370,6 +370,14 @@ function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Principal
     catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
    });
   }
+  if(isTelegram&&telegram&&scope&&await telegram.canSendGroup(scopedPrincipal,scope.eventId,scope.epoch)){
+   server.registerTool('telegram_send_group',{description:'Send one short message to the single configured group on this verified private owner request, expressed in ordinary language. Choose useful text from the request/current context; no slash command required. Never copy private context unless owner requested that disclosure. Queued is not sent. Call telegram_group_delivery and confirm only state=sent. No arbitrary recipient. One message per owner event.',inputSchema:{text:z.string().trim().min(1).max(1000)}},async({text})=>{
+    try{return result(await telegram.sendGroup(scopedPrincipal,scope.eventId,scope.epoch,text));}catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
+   });
+   server.registerTool('telegram_group_delivery',{description:'Check a group send requested from this private owner chat. Only sent confirms actual Telegram acceptance. Pending/retry_wait means queued, unknown means do not retry, failed/cancelled/expired means not sent.',inputSchema:{id:z.uuid()}},async({id})=>{
+    try{return result(await telegram.groupDelivery(scopedPrincipal,scope.eventId,scope.epoch,id));}catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
+   });
+  }
   if(isTelegram && telegram)server.registerTool('telegram_read_history',{
     description:'Read the bounded local journal of this chat only; history may be incomplete.',
     inputSchema:{limit:z.number().int().min(1).max(20).default(20),before:z.string().regex(/^\d+$/).max(18).optional()}
@@ -390,7 +398,7 @@ app.post('/mcp', async (req, reply) => {
   const legacyGuard=guard;
   guard=async()=>{if(runtimeEngine)await runtimeEngine.assertLegacyTurn(principal);await legacyGuard();};
   if(runtimeEngine)await runtimeEngine.assertLegacyTurn(principal);
-  const server = gateway(scope,scopedPrincipal,isTelegram,guard);
+  const server = await gateway(scope,scopedPrincipal,isTelegram,guard);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   reply.hijack();
   reply.raw.on('close', () => { void transport.close(); void server.close(); });

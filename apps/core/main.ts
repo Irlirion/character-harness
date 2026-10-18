@@ -40,10 +40,10 @@ await pool.query(`INSERT INTO characters(id,name,persona) VALUES($1,$2,$3)
 const telegramToken=process.env.TELEGRAM_WORKER_TOKEN_FILE || process.env.TELEGRAM_WORKER_TOKEN ? secret('TELEGRAM_WORKER_TOKEN') : undefined;
 if(telegramToken && (telegramToken.length<32 || new Set([telegramToken,engineToken,ownerToken,audioToken,bridgeToken]).size!==5)) throw new Error('Distinct Telegram worker token required');
 const runtime=enableRuntimeStorage?new RuntimeStore(pool):undefined;
-const telegram=telegramToken?new TelegramStore(pool,character.id,runtime):undefined;
 const runtimeAuth=runtime?new RuntimeAuthorizationStore(pool):undefined;
 const reviewerConfig=runtime?await loadReviewerConfig(process.env.RUNTIME_REVIEWER_CONFIG_FILE):undefined;
 const reviewer=reviewerConfig&&runtimeAuth?createProcessReviewer(reviewerConfig,(signal,binding)=>runtimeAuth.reserveReview(principal,reviewerConfig.max_requests_24h,signal,binding)):undefined;
+const telegram=telegramToken?new TelegramStore(pool,character.id,runtime,reviewer?{reviewer,timeoutMs:reviewerConfig!.timeout_ms+100}:undefined):undefined;
 const app = buildApp({
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken,telegram:telegramToken },
   telegram,
