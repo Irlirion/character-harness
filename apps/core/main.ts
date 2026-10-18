@@ -1,3 +1,4 @@
+import {GroupDirectorySchema} from '../../packages/telegram/group-directory.ts';
 import {sharedDesk} from '../../packages/storage/workplace.ts';
 import { RuntimeAuthorizationStore } from '../../packages/storage/runtime-authorization.ts';
 import { createProcessReviewer,loadReviewerConfig } from '../../packages/runtime/reviewer.ts';
@@ -43,7 +44,10 @@ const runtime=enableRuntimeStorage?new RuntimeStore(pool):undefined;
 const runtimeAuth=runtime?new RuntimeAuthorizationStore(pool):undefined;
 const reviewerConfig=runtime?await loadReviewerConfig(process.env.RUNTIME_REVIEWER_CONFIG_FILE):undefined;
 const reviewer=reviewerConfig&&runtimeAuth?createProcessReviewer(reviewerConfig,(signal,binding)=>runtimeAuth.reserveReview(principal,reviewerConfig.max_requests_24h,signal,binding)):undefined;
-const telegram=telegramToken?new TelegramStore(pool,character.id,runtime,reviewer?{reviewer,timeoutMs:reviewerConfig!.timeout_ms+100}:undefined):undefined;
+const telegram=telegramToken?new TelegramStore(pool,character.id,runtime,reviewer?{reviewer,timeoutMs:reviewerConfig!.timeout_ms+100}:undefined,async(chat_id,known_user_ids)=>{
+ const r=await fetch('http://telegram:3001/group-participants',{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${telegramToken}`,'Content-Type':'application/json'},body:JSON.stringify({chat_id,known_user_ids}),signal:AbortSignal.timeout(20000)});
+ if(!r.ok)throw new Error('directory_worker_unavailable');return GroupDirectorySchema.parse(await r.json());
+}):undefined;
 const app = buildApp({
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken,telegram:telegramToken },
   telegram,

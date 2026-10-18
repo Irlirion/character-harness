@@ -1,3 +1,4 @@
+import {groupDirectoryServer} from '../../packages/telegram/directory-server.ts';
 import { attemptDelivery } from '../../packages/telegram/delivery.ts';
 import { randomUUID } from 'node:crypto';
 import { BotApi, BotApiError } from '../../packages/telegram/api.ts';
@@ -43,6 +44,9 @@ while(!stopped && !me) {
 }
 if(me) {
  const botId=String(me.id);
+ const directory=groupDirectoryServer(bot,secret('TELEGRAM_WORKER_TOKEN'));
+ directory.listen(3001,'0.0.0.0');
+ controller.signal.addEventListener('abort',()=>{directory.closeAllConnections();directory.close();},{once:true});
  console.log(JSON.stringify({event:'telegram_started',bot_id:botId}));
  async function setState(state:string){await core('/telegram/state',{bot_id:botId,owner,state}).catch(()=>{});}
  async function poll() {

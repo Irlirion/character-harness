@@ -96,3 +96,23 @@ addressee inside that group is not a new chat recipient. Receipts are contextual
 a current directive is still required, and unrelated greetings/questions are not sends.
 Ambiguous-addressee errors are reported with a concrete clarification instead of claiming
 that Telegram is unavailable. No stored failed message is automatically replayed.
+
+## Group participant queries (on demand)
+
+`telegram_group_participants` reads Telegram's current member count, administrators
+and membership of up to 20 authors already observed in this group's recent journal.
+The Bot API does not enumerate every member. The result always says complete=false,
+includes partial API permission/errors and a timestamp, and strips numeric user IDs.
+Names/usernames are untrusted display labels, not cross-channel identity mappings.
+
+Within a group only that group can be queried. Within the verified private owner chat,
+only the single configured group can be queried. Active turn, epoch, source and target
+bindings are rechecked after the read. The worker keeps the Bot API token; an internal
+read-only endpoint accepts only the worker credential and has no published host port.
+There is no background roster collection, directory table or result cache. Ordinary
+chat replies remain subject to the existing journal behavior. No permission changes,
+member scraping/enumeration, additional recipients or outbound posts are introduced.
+
+Reference: https://core.telegram.org/bots/api#getchatadministrators,
+https://core.telegram.org/bots/api#getchatmembercount,
+https://core.telegram.org/bots/api#getchatmember.

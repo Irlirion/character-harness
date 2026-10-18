@@ -10,7 +10,7 @@ export class BotApi {
     this.token=token;this.transport=transport;
     if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) throw new Error('invalid_bot_token');
   }
-  async call(method:'getMe'|'getWebhookInfo'|'getUpdates'|'sendMessage'|'sendPhoto', body:Record<string,unknown>={}):Promise<any> {
+  async call(method:'getChatMemberCount'|'getChatAdministrators'|'getChatMember'|'getMe'|'getWebhookInfo'|'getUpdates'|'sendMessage'|'sendPhoto', body:Record<string,unknown>={}):Promise<any> {
     let payload:BodyInit=JSON.stringify(body);let headers:Record<string,string>|undefined={'Content-Type':'application/json'};
     if(method==='sendPhoto'){
       if(!(body.photo instanceof Uint8Array))throw new BotApiError('rejected');

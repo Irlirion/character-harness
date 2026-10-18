@@ -9,10 +9,10 @@ test('natural-language private owner group sends are reviewed, scoped and durabl
  try{
   await admin.query(`CREATE SCHEMA ${schema}`);const url=new URL(process.env.TEST_DATABASE_URL!);url.searchParams.set('options',`-c search_path=${schema}`);db=new pg.Pool({connectionString:url.toString()});const pool=db;
   for(const f of (await readdir(new URL('../migrations/',import.meta.url))).filter(f=>f.endsWith('.sql')).sort())await pool.query(await readFile(new URL('../migrations/'+f,import.meta.url),'utf8'));
-  const auth=new RuntimeAuthorizationStore(pool);let reviews:any[]=[],deny=false,revoke=false;const owner=randomUUID();
-  const tg=new TelegramStore(pool,'lada',undefined,{timeoutMs:1000,reviewer:async(r,s)=>{reviews.push(r.payload);if(revoke)await pool.query('UPDATE telegram_bindings SET runtime_control=false,revision=revision+1 WHERE kind=\'private\'');return {...await allowTestReviewer(r,s),...(deny?{verdict:'deny' as const,rule_id:'test_blocked'}:{})};}});
+  const auth=new RuntimeAuthorizationStore(pool);let reviews:any[]=[],deny=false,revoke=false,readerRevoke=false;const reads:any[]=[];const owner=randomUUID();
+  const tg=new TelegramStore(pool,'lada',undefined,{timeoutMs:1000,reviewer:async(r,s)=>{reviews.push(r.payload);if(revoke)await pool.query('UPDATE telegram_bindings SET runtime_control=false,revision=revision+1 WHERE kind=\'private\'');return {...await allowTestReviewer(r,s),...(deny?{verdict:'deny' as const,rule_id:'test_blocked'}:{})};}},async(chatId,ids)=>{reads.push({chatId,ids});if(readerRevoke)await pool.query("UPDATE telegram_bindings SET enabled=false,revision=revision+1 WHERE kind='group'");return {member_count:3,administrators:[{display_name:'Admin',username:null,status:'administrator'}],known_members:[{display_name:'Misha',username:null,status:'member'}],count_error:null,administrators_error:null,member_lookup_errors:0};});
   let priv:any,group:any,uid=0;
-  const reset=async()=>{await pool.query('TRUNCATE characters CASCADE');await pool.query("INSERT INTO characters(id,name,persona) VALUES('lada','Lada','test')");await tg.register('99','bot');await tg.polling('99',owner);await tg.accountState('99','connected',owner);priv=await tg.bind('99','8','private',true);group=await tg.bind('99','-42','group',true);await tg.runtimeControl(priv.id,true);await auth.installProfile(p,testProfile());reviews=[];deny=false;revoke=false;};
+  const reset=async()=>{await pool.query('TRUNCATE characters CASCADE');await pool.query("INSERT INTO characters(id,name,persona) VALUES('lada','Lada','test')");await tg.register('99','bot');await tg.polling('99',owner);await tg.accountState('99','connected',owner);priv=await tg.bind('99','8','private',true);group=await tg.bind('99','-42','group',true);await tg.runtimeControl(priv.id,true);await auth.installProfile(p,testProfile());reviews=[];deny=false;revoke=false;readerRevoke=false;reads.length=0;};
   const event=async(text='напиши в группу',chat=8,kind='private',author=8)=>{
    await tg.ingest('99',owner,[{update_id:++uid,message:{message_id:uid,date:Math.floor(Date.now()/1000),chat:{id:chat,type:kind},from:{id:author,is_bot:false},text}}]);
    if(kind!=='private')await pool.query("UPDATE telegram_messages SET observed_at=now()-interval '11 seconds'");await tg.prepare();
@@ -44,6 +44,13 @@ test('natural-language private owner group sends are reviewed, scoped and durabl
     const second=await event('Поздравь его');await tg.sendGroup(scope(),second.id,second.epoch,'С праздником!');assert.equal(reviews.at(-1).recent_confirmed_group_deliveries.length,0);
    }
   });
+  await t.test('participants are read on demand for authorized scopes without storing a roster',async()=>{
+   await reset();await pool.query("INSERT INTO telegram_messages(binding_id,message_id,author_id,text,consumed) VALUES($1,'known','telegram:22','Public group message',true)",[group.id]);
+   const e=await event('Кто есть в группе?');const d=await tg.groupParticipants(scope(),e.id,e.epoch);assert.equal(d.complete,false);assert.equal(d.target,'configured_group');assert.equal(d.member_count,3);assert.equal(d.known_members[0].display_name,'Misha');assert.deepEqual(reads,[{chatId:'-42',ids:['22']}]);assert.equal((await pool.query('SELECT count(*)::int n FROM telegram_messages')).rows[0].n,2);
+   readerRevoke=true;await assert.rejects(tg.groupParticipants(scope(),e.id,e.epoch));
+   await reset();const g=await event('Кто здесь?',-42,'supergroup');const current=await tg.groupParticipants({...p,audienceId:group.audience_id},g.id,g.epoch);assert.equal(current.target,'current_group');
+   await reset();const stranger=await event('Список участников',8,'private',9);await assert.rejects(tg.groupParticipants(scope(),stranger.id,stranger.epoch),{code:'directory_owner_required'});assert.equal(reads.length,0);
+  });
   await t.test('private owner MCP exposes send/status and executes the ordinary dialogue tool path',async()=>{
    await reset();const e=await event();const tokens={engine:'e'.repeat(64),owner:'o'.repeat(64),audio:'a'.repeat(64),bridge:'b'.repeat(64),telegram:'t'.repeat(64)};
    const unused=async()=>{throw new Error('unused');};
@@ -52,7 +59,7 @@ test('natural-language private owner group sends are reviewed, scoped and durabl
     const base=await app.listen({port:0,host:'127.0.0.1'});
     const headers={'Content-Type':'application/json',authorization:'Bearer '+tokens.engine,'x-harness-event':e.id,'x-harness-epoch':String(e.epoch),accept:'application/json, text/event-stream'};
     const rpc=async(method:string,params:any)=>{const response=await fetch(base+'/mcp',{method:'POST',headers,body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});return {json:()=>response.json()};};
-    const catalog=(await (await rpc('tools/list',{})).json()).result.tools.map((x:any)=>x.name);assert.ok(catalog.includes('telegram_send_group'));assert.ok(catalog.includes('telegram_group_delivery'));assert.ok(!catalog.includes('agent_walk'));
+    const catalog=(await (await rpc('tools/list',{})).json()).result.tools.map((x:any)=>x.name);assert.ok(catalog.includes('telegram_group_participants'));assert.ok(catalog.includes('telegram_send_group'));assert.ok(catalog.includes('telegram_group_delivery'));assert.ok(!catalog.includes('agent_walk'));
     const queued=await (await rpc('tools/call',{name:'telegram_send_group',arguments:{text:'Привет, группа!'}})).json();assert.equal(queued.result.isError,undefined);const receipt=JSON.parse(queued.result.content[0].text);assert.equal(receipt.state,'pending');
     const job=await tg.claim('99',owner);await tg.delivered(job!.id,job!.claim_id,'sent','702');
     const status=await (await rpc('tools/call',{name:'telegram_group_delivery',arguments:{id:receipt.id}})).json();assert.equal(JSON.parse(status.result.content[0].text).state,'sent');

@@ -379,6 +379,9 @@ async function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Pri
     try{return result(await telegram.groupDelivery(scopedPrincipal,scope.eventId,scope.epoch,id));}catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
    });
   }
+  if(isTelegram&&telegram&&scope&&await telegram.canReadGroup(scopedPrincipal,scope.eventId,scope.epoch))server.registerTool('telegram_group_participants',{description:'Query current available participants on demand: member count, administrators and checked known message authors. In a group reads this group; in the verified owner private chat reads the configured group. Not a complete roster. Call for questions about who is in the group and report available names/count and partial coverage. No numeric IDs or cross-channel identities. Does not save a member list.',inputSchema:{}},async()=>{
+   try{return result(await telegram.groupParticipants(scopedPrincipal,scope.eventId,scope.epoch));}catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
+  });
   if(isTelegram && telegram)server.registerTool('telegram_read_history',{
     description:'Read the bounded local journal of this chat only; history may be incomplete.',
     inputSchema:{limit:z.number().int().min(1).max(20).default(20),before:z.string().regex(/^\d+$/).max(18).optional()}
