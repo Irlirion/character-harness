@@ -31,6 +31,7 @@ services:
       OWNER_TOKEN_FILE: /run/secrets/owner_token
       AUDIO_TOKEN_FILE: /run/secrets/audio_token
       BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
+      RUNTIME_STORAGE_ENABLED: ${RUNTIME_STORAGE_ENABLED:-false}
       BRIDGE_CLIENT_WORLD_ENABLED: ${BRIDGE_CLIENT_WORLD_ENABLED:-false}
       CHARACTER_ID: ${CHARACTER_ID:-lada}
       CHARACTER_FILE: ${CHARACTER_FILE:-characters/Lada/personalities.yml}
@@ -58,6 +59,7 @@ services:
     profiles: [agent]
     environment:
       CORE_URL: http://core:3000
+      RUNTIME_ENGINE_ENABLED: ${RUNTIME_ENGINE_ENABLED:-false}
       ENGINE_TOKEN_FILE: /run/secrets/engine_token
       MODEL_API_KEY_FILE: /run/secrets/model_api_key
       PI_PROVIDER: ${PI_PROVIDER:-}
@@ -79,6 +81,7 @@ services:
     profiles: [codex]
     environment:
       CORE_URL: http://core:3000
+      RUNTIME_ENGINE_ENABLED: ${RUNTIME_ENGINE_ENABLED:-false}
       ENGINE_TOKEN_FILE: /run/secrets/engine_token
       HARNESS_CODEX_HOME: /data/codex
       CODEX_MODEL: ${CODEX_MODEL:-gpt-6-luna}

@@ -1,3 +1,6 @@
+import { RuntimeConsumer } from '../../packages/runtime/consumer.ts';
+import { runtimeEngineEnabled } from '../../packages/runtime/protocol.ts';
+import { runCodexPlanning } from '../../packages/runtime/codex-runner.ts';
 import { runImageLoop } from './images.ts';
 import { IMAGE_INSTRUCTIONS } from '../../packages/images/domain.ts';
 import { TELEGRAM_INSTRUCTIONS,parseTelegramDecision,telegramOutputSchema } from '../../packages/telegram/domain.ts';
@@ -12,6 +15,8 @@ import { makeTurnInput } from '../../packages/domain/conversation-context.ts';
 import { TurnFinishDecisionSchema, type TurnFinishDecision } from '../../packages/domain/turn-decision.ts';
 import { secret } from '../../packages/domain/secrets.ts';
 import { CODEX_ACTION_INSTRUCTIONS } from '../../packages/codex/instructions.ts';
+const enableRuntimeEngine=runtimeEngineEnabled(process.env.RUNTIME_ENGINE_ENABLED);
+const runtimeStop=new AbortController();
 const home=process.env.HARNESS_CODEX_HOME??'/data/codex';
 const cwd=process.env.HARNESS_CODEX_WORKSPACE??'/data/workspace';
 await configureCodex(home,cwd);
@@ -25,7 +30,7 @@ async function api(path:string,body?:unknown){
 let stopped=false;let threadId:string|undefined;let turnId:string|undefined;
 let wakeSleep:(()=>void)|undefined;
 let stopImages:()=>void=()=>{};
-const stop=()=>{stopped=true;stopImages();wakeSleep?.();rpc.close();};process.once('SIGTERM',stop);process.once('SIGINT',stop);
+const stop=()=>{stopped=true;runtimeStop.abort();stopImages();wakeSleep?.();rpc.close();};process.once('SIGTERM',stop);process.once('SIGINT',stop);
 await rpc.initialize();
 const auth=await rpc.request('account/read',{refreshToken:false});
 if(auth.account?.type!=='chatgpt'){rpc.close();throw new Error('Run the isolated Codex ChatGPT login first');}
@@ -40,13 +45,17 @@ const sleep=(ms:number)=>new Promise<void>(resolve=>{
  const timer=setTimeout(done,ms);
  wakeSleep=done;
 });
+const runtime=enableRuntimeEngine?new RuntimeConsumer(api,{engine:'codex',model:selected.model??selected.id}):undefined;
 while(!stopped){
   const client=new Client({name:'codex-harness-bridge',version:'0.1.0'});
   let pendingEventId:string|undefined;
   let pendingEpoch:number|undefined;
   let finishDecision:TurnFinishDecision|undefined;
   try{
-   const input=await api('/engine/input');if(!input.event){await sleep(1000);continue;}
+   const input=await api('/engine/input');if(!input.event){
+    if(runtime)await runtime.tick((context,persona,signal,onUsage)=>runCodexPlanning(rpc,cwd,selected.model??selected.id,context,persona,signal,onUsage),runtimeStop.signal);
+    await sleep(1000);continue;
+   }
    pendingEventId=input.event.id;
    pendingEpoch=input.character.epoch;
   const isTelegram=input.event.channel==='telegram';

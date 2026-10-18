@@ -1,3 +1,4 @@
+import { runtimeOwnerRoutes, runtimeEngineRoutes, type RuntimeOwnerStore, type RuntimeEngineStore, type RuntimePlanningPolicy } from './runtime.ts';
 import type { ImageStore } from '../../packages/storage/images.ts';
 import { ImageSchema } from '../../packages/images/domain.ts';
 import { telegramRoutes } from './telegram.ts';
@@ -53,6 +54,9 @@ export type BuildAppOptions = {
   allowSystemChatPublicDemo: boolean;
   allowClientWorld?: boolean;
   deps: CoreDeps;
+  runtime?: RuntimeOwnerStore;
+  runtimeEngine?: RuntimeEngineStore;
+  runtimePolicy?: RuntimePlanningPolicy;
   telegram?:TelegramStore;
   images?:ImageStore;
   memoryInstructions?: string;
@@ -64,7 +68,7 @@ function emptySocialContext(): SocialContextInput {
 }
 
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
-export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps, memoryInstructions = '', responseInstructions = '', telegram, images }: BuildAppOptions): FastifyInstance {
+export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps, memoryInstructions = '', responseInstructions = '', telegram, images, runtime, runtimeEngine, runtimePolicy }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 // Roles share a token, so budget by role rather than IP or attacker-supplied headers.
 // Audio and action leases poll frequently; keep bridge event ingestion in its own budget.
@@ -116,6 +120,8 @@ app.setErrorHandler((error, _req, reply) => {
   app.log.error({ name: error instanceof Error ? error.name : 'unknown' }, 'Request failed');
   return reply.code(500).send({ error: 'internal_error' });
 });
+if (runtime) runtimeOwnerRoutes(app, principal, runtime);
+if (runtimeEngine) runtimeEngineRoutes(app,principal,runtimePolicy);
 if(telegram)telegramRoutes(app,telegram);
 if(images){
  app.get('/owner/images',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},()=>images.status());
@@ -130,7 +136,7 @@ app.get('/health', async () => ({ alive: true }));
 app.get('/ready', async () => { await pool.query('SELECT 1'); return { ready: true }; });
 app.get('/engine/status', async () => status(principal));
 // The global handler runs first to retain the shared role budget; route config also exposes the limit to static analysis.
-app.get('/owner/status', {preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}}, async () => ({ character: await status(principal), audience: principal.audienceId, adapters: { minecraft: 'not_implemented', telegram: telegram?await telegram.overview():'not_implemented', voice: 'not_implemented' } }));
+app.get('/owner/status', {preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}}, async () => ({ character: await status(principal), audience: principal.audienceId, runtime: { storage_enabled: !!runtime, protocol_enabled: !!runtimeEngine, autonomous_execution: false, policy_gate: runtimePolicy?'installed':'unavailable' }, adapters: { minecraft: 'not_implemented', telegram: telegram?await telegram.overview():'not_implemented', voice: 'not_implemented' } }));
 app.get('/owner/inspect-context', async req => {
   if (!deps.inspectEvent) throw new DomainError('context_inspection_unavailable');
   const query=z.object({event_id:z.string().uuid().optional()}).strict().parse(req.query);
@@ -380,6 +386,9 @@ app.post('/mcp', async (req, reply) => {
     const current=await telegram.scope(scope.eventId,scope.epoch);scopedPrincipal=current;isTelegram=current.channel==='telegram';
     guard=()=>telegram.scope(scope.eventId,scope.epoch);
   }
+  const legacyGuard=guard;
+  guard=async()=>{if(runtimeEngine)await runtimeEngine.assertLegacyTurn(principal);await legacyGuard();};
+  if(runtimeEngine)await runtimeEngine.assertLegacyTurn(principal);
   const server = gateway(scope,scopedPrincipal,isTelegram,guard);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   reply.hijack();

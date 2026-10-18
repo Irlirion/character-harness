@@ -26,9 +26,10 @@ export async function remember(p: Principal, text: string, invocationId: string,
   const db = await pool.connect();
   try {
     await db.query('BEGIN');
-    const { rows } = await db.query('SELECT paused,epoch,lease_until FROM characters WHERE id=$1 FOR UPDATE', [p.characterId]);
+    const { rows } = await db.query('SELECT * FROM characters WHERE id=$1 FOR UPDATE', [p.characterId]);
     if (!rows[0]) throw new DomainError('character_not_found');
     assertActive(rows[0], epoch);
+    if (rows[0].active_runtime_turn_id) throw new DomainError('runtime_tools_disabled');
     if (!rows[0].lease_until || new Date(rows[0].lease_until).getTime() <= Date.now()) throw new DomainError('lease_expired');
     const payload = JSON.stringify({ text });
     const old = await db.query(`SELECT payload,result FROM operations WHERE character_id=$1 AND audience_id=$2 AND invocation_id=$3`,

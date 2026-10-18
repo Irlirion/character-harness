@@ -1,3 +1,8 @@
+import { RuntimeAuthorizationStore } from '../../packages/storage/runtime-authorization.ts';
+import { createProcessReviewer,loadReviewerConfig } from '../../packages/runtime/reviewer.ts';
+import { RuntimePolicyGate } from '../../packages/runtime/gate.ts';
+import { RuntimeStore } from '../../packages/storage/runtime.ts';
+import { runtimeStorageEnabled } from '../../packages/runtime/contracts.ts';
 import { ImageStore } from '../../packages/storage/images.ts';
 import { TelegramStore } from '../../packages/storage/telegram.ts';
 import { buildApp } from './app.ts';
@@ -9,6 +14,7 @@ import { enqueueSpeech, claimSpeech, speechState, updateSpeech } from '../../pac
 import { enqueueClientAction, clientActionStatus, clientActionLease, claimClientAction, finishClientAction, cancelActiveClientActions } from '../../packages/storage/actions.ts';
 import { saveWorldObservation, latestWorldObservation } from '../../packages/storage/observations.ts';
 
+const enableRuntimeStorage = runtimeStorageEnabled(process.env.RUNTIME_STORAGE_ENABLED);
 const character = await loadCharacter(process.env.CHARACTER_FILE, process.env.CHARACTER_ID);
 const principal = { characterId: character.id, audienceId: process.env.AUDIENCE_ID ?? 'demo-public' };
 const engineToken = secret('ENGINE_TOKEN');
@@ -32,9 +38,16 @@ await pool.query(`INSERT INTO characters(id,name,persona) VALUES($1,$2,$3)
 const telegramToken=process.env.TELEGRAM_WORKER_TOKEN_FILE || process.env.TELEGRAM_WORKER_TOKEN ? secret('TELEGRAM_WORKER_TOKEN') : undefined;
 if(telegramToken && (telegramToken.length<32 || new Set([telegramToken,engineToken,ownerToken,audioToken,bridgeToken]).size!==5)) throw new Error('Distinct Telegram worker token required');
 const telegram=telegramToken?new TelegramStore(pool,character.id):undefined;
+const runtime=enableRuntimeStorage?new RuntimeStore(pool):undefined;
+const runtimeAuth=runtime?new RuntimeAuthorizationStore(pool):undefined;
+const reviewerConfig=runtime?await loadReviewerConfig(process.env.RUNTIME_REVIEWER_CONFIG_FILE):undefined;
+const reviewer=reviewerConfig&&runtimeAuth?createProcessReviewer(reviewerConfig,(signal,binding)=>runtimeAuth.reserveReview(principal,reviewerConfig.max_requests_24h,signal,binding)):undefined;
 const app = buildApp({
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken,telegram:telegramToken },
   telegram,
+  runtime, runtimeEngine:runtime,
+  // A reviewer bridge requires explicit operator configuration; no profile is installed automatically.
+  runtimePolicy:runtime&&runtimeAuth?new RuntimePolicyGate(runtime,runtimeAuth,reviewer,reviewerConfig?reviewerConfig.timeout_ms+100:2000):undefined,
   images:telegram && process.env.TELEGRAM_IMAGES_ENABLED==='true'?new ImageStore(pool,character.id):undefined,
   allowSystemChatPublicDemo, allowClientWorld,
   memoryInstructions,
