@@ -19,7 +19,7 @@ export const WorkDecisionSchema = z.object({
   invocation_id: z.string().min(1).max(200), turn_id: z.uuid(), lease_token: z.uuid(),
   epoch: z.number().int().positive(), expected_version: z.number().int().positive(),
   checkpoint: z.string().max(16_000), decision: DecisionSchema,
-  desk:DeskWriteSchema.optional(),initiative:InitiativeSchema.optional(),
+  desk:DeskWriteSchema.optional(),shared_desk:DeskWriteSchema.optional(),initiative:InitiativeSchema.optional(),
 }).strict();
 export const CancelActivitySchema = z.object({ expected_version: z.number().int().positive() }).strict();
 export type CreateActivity = z.infer<typeof CreateActivitySchema>;

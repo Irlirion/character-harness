@@ -7,7 +7,7 @@ import {assertCurrentProfile} from '../storage/runtime-authorization.ts';
 import type {RuntimeStore} from '../storage/runtime.ts';
 import type {TelegramMessage} from './domain.ts';
 
-const help='Задачи: /task <что спланировать>\n/tasks — список\n/status [ID] — состояние и вопрос\n/result [ID] — результат\n/answer [ID] <ответ> — продолжить\n/cancel [ID] — отменить. Без ID выбирается последняя подходящая задача. Это планирование, без действий в игре.\n/autonomy on | off — самостоятельная работа в группе\n/desk — заметки и план группы';
+const help='Задачи: /task <что спланировать>\n/tasks — список\n/status [ID] — состояние и вопрос\n/result [ID] — результат\n/answer [ID] <ответ> — продолжить\n/cancel [ID] — отменить. Без ID выбирается последняя подходящая задача. Это планирование, без действий в игре.\n/autonomy on | off — самостоятельная работа в группе\n/desk — общий стол и отдельные заметки группы';
 export function runtimeCommand(text:string,username:string){
  const match=/^\/(task|tasks|status|result|answer|cancel|help_tasks|autonomy|desk)(?:@([a-zA-Z0-9_]+))?(?:\s+([\s\S]*))?$/.exec(text.trim());
  if(!match||match[2]&&match[2].toLowerCase()!==username.toLowerCase())return null;
@@ -24,14 +24,14 @@ export async function handleRuntimeCommand(db:pg.PoolClient,store:RuntimeStore,b
  try{
   if(cmd.name==='autonomy'||cmd.name==='desk'){
    const group=(await db.query("SELECT b.*,a.enabled AS autonomous,a.next_wake_at FROM telegram_bindings b LEFT JOIN runtime_autonomy a ON a.binding_id=b.id WHERE b.character_id=$1 AND b.kind='group' AND b.enabled",[b.character_id])).rows[0];
-   if(!group)return {text:'Нет подключённой группы.'};
+   if(!group&&cmd.name==='autonomy')return {text:'Нет подключённой группы.'};
    if(cmd.name==='autonomy'){
     if(cmd.argument&&!['on','off'].includes(cmd.argument))return {text:'/autonomy on | off — управление; /autonomy — состояние; /desk — рабочий стол группы'};
     if(cmd.argument){await configureAutonomy(db,b.character_id,group.id,cmd.argument==='on');group.autonomous=cmd.argument==='on';}
     return {text:'Автономность группы: '+(group.autonomous?'включена':'выключена')+'\nПробуждения раз в 2 часа; 09–21 по Германии; до 2 первых сообщений за сутки. Молчание — допустимое решение. /desk'};
    }
-   const ctx=await deskContext(db,{characterId:b.character_id,audienceId:group.audience_id});
-   const text='Рабочий стол группы · версия '+ctx.desk.revision+'\nПлан: '+(ctx.desk.plan||'пока пуст')+'\nЗаметки: '+(ctx.desk.notes||'пока пуст');
+   const ctx=await deskContext(db,{characterId:b.character_id,audienceId:group?.audience_id??b.audience_id});
+   const text='Общий рабочий стол · версия '+ctx.shared_desk.revision+'\nПлан: '+(ctx.shared_desk.plan||'пока пуст').slice(0,600)+'\nЗаметки: '+(ctx.shared_desk.notes||'пока пуст').slice(0,800)+'\nОтдельные заметки '+(group?'группы':'этой лички')+' · версия '+ctx.desk.revision+'\n'+(ctx.desk.plan||ctx.desk.notes||'пока пуст').slice(0,350);
    return {text:secretDetected(text)?'Выдача заметок заблокирована.':text.slice(0,2000)};
   }
   if(cmd.name==='help_tasks')return {text:help};

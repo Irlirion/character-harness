@@ -16,7 +16,7 @@ export function fingerprint(value:unknown):string {
  const canonical=(v:any):any=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
  return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 }
-export function decisionPayload(b:any){return {checkpoint:b.checkpoint,decision:b.decision,...(b.desk?{desk:b.desk}:{}),...(b.initiative?{initiative:b.initiative}:{})};}
+export function decisionPayload(b:any){return {checkpoint:b.checkpoint,decision:b.decision,...(b.desk?{desk:b.desk}:{}),...(b.shared_desk?{shared_desk:b.shared_desk}:{}),...(b.initiative?{initiative:b.initiative}:{})};}
 export function sourceFingerprint(a:any,checkpoint:string|null,persona:string) {
  return fingerprint({id:a.id,version:a.version,objective:a.objective,max_turns:a.max_turns,turns_used:a.turns_used,input_reply:a.input_reply??null,checkpoint,persona});
 }

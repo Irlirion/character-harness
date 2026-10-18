@@ -37,7 +37,7 @@ test('persistent autonomous workplace and checked initiative',{skip:!process.env
   const gate=new RuntimePolicyGate(runtime,auth,allowTestReviewer),w=(await gate.claim(p,{request_id:randomUUID(),...testIdentity})).work!;assert.ok(w);
   assert.deepEqual(w.model_input!.desk,{revision:1,notes:'',plan:''});assert.equal(w.model_input!.autonomy!.posting_allowed,true);
   const lease={turn_id:w.turn.id,epoch:w.turn.epoch,lease_token:w.turn.lease_token};await gate.start(p,{...lease,grant_id:w.authorization!.id,input_hash:w.authorization!.input_hash,...testIdentity});
-  const body={...lease,invocation_id:randomUUID(),expected_version:w.activity.version,checkpoint:'Useful local work',decision:{action:'complete',summary:'Prepared a conversation idea'},desk:{expected_revision:1,notes:'Ideas for this group',plan:'Avoid repeating recent topics'},initiative:{text:'Можем устроить небольшую совместную стройку на выходных.',reason:'A concrete optional group activity'}};
+  const body={...lease,invocation_id:randomUUID(),expected_version:w.activity.version,checkpoint:'Useful local work',decision:{action:'complete',summary:'Prepared a conversation idea'},desk:{expected_revision:1,notes:'Ideas for this group',plan:'Avoid repeating recent topics'},shared_desk:{expected_revision:1,notes:'I enjoy collaborative creative projects',plan:'Develop a bridge-building idea for both channels'},initiative:{text:'Можем устроить небольшую совместную стройку на выходных.',reason:'A concrete optional group activity'}};
   // Exercise the actual outbox insert with a fixed daytime clock, then roll it back.
   const c=await db.connect();try{
    await c.query('BEGIN');const state=(await c.query("SELECT * FROM characters WHERE id='lada' FOR UPDATE")).rows[0];
@@ -53,15 +53,27 @@ test('persistent autonomous workplace and checked initiative',{skip:!process.env
   const noPost={...body,initiative:undefined};await gate.decide(p,noPost);await gate.decide(p,noPost);
   const restarted=new RuntimeStore(db);assert.equal((await restarted.desk(p)).desk.revision,2);assert.equal((await restarted.desk(p)).desk.notes,'Ideas for this group');
   assert.equal((await restarted.desk({...p,audienceId:'private'})).desk.notes,'');
+  assert.equal((await restarted.desk({...p,audienceId:'demo-public'})).shared_desk.notes,'I enjoy collaborative creative projects');
+  assert.equal((await restarted.desk({...p,characterId:'another'})).shared_desk.notes,'');
   await assert.rejects(runtime.assign(p,{invocation_id:'forged',objective:'x',origin:'self'}));
   await db.query("UPDATE runtime_autonomy SET next_wake_at=now()-interval '1 minute'");await schedule();
   let reviewed:any;const rejectGate=new RuntimePolicyGate(runtime,auth,async(r,s)=>{if(r.phase==='output'){reviewed=r.payload;return {...await allowTestReviewer(r,s),verdict:'deny',rule_id:'test_denied'};}return allowTestReviewer(r,s);});
   const second=(await rejectGate.claim(p,{request_id:randomUUID(),...testIdentity})).work!;assert.ok(second);const l2={turn_id:second.turn.id,epoch:second.turn.epoch,lease_token:second.turn.lease_token};await rejectGate.start(p,{...l2,grant_id:second.authorization!.id,input_hash:second.authorization!.input_hash,...testIdentity});
   await assert.rejects(rejectGate.decide(p,{...body,...l2,expected_version:second.activity.version,desk:{...body.desk,expected_revision:2}}),{code:'runtime_output_blocked'});
+  assert.equal(reviewed.shared_desk.notes,body.shared_desk.notes);assert.equal((await restarted.desk(p)).shared_desk.revision,2);
   assert.equal(reviewed.initiative.text,body.initiative.text);assert.equal(reviewed.desk.notes,body.desk.notes);
   assert.equal((await db.query('SELECT count(*)::int n FROM telegram_outbox')).rows[0].n,0);assert.equal((await restarted.desk(p)).desk.revision,2);
   await tg.autonomy(group.id,false);assert.equal((await restarted.desk(p)).autonomy,undefined);
   assert.equal((await gate.claim(p,{request_id:randomUUID(),...testIdentity})).work,null);
+  const privateScope={...p,audienceId:'private'};await runtime.assign(privateScope,{invocation_id:'race',objective:'Maintain my common plan'});
+  const changingGate=new RuntimePolicyGate(runtime,auth,async(r,s)=>{if(r.phase==='input')await db.query("UPDATE runtime_shared_desks SET revision=revision+1,plan='Concurrent update'");return allowTestReviewer(r,s);});
+  assert.equal((await changingGate.claim(privateScope,{request_id:randomUUID(),...testIdentity})).reason,'runtime_context_changed');
+  const fresh=(await gate.claim(privateScope,{request_id:randomUUID(),...testIdentity})).work!;assert.ok(fresh);assert.equal(fresh.model_input!.shared_desk!.plan,'Concurrent update');assert.equal(fresh.model_input!.desk!.notes,'');
+  const fl={turn_id:fresh.turn.id,epoch:fresh.turn.epoch,lease_token:fresh.turn.lease_token};await gate.start(privateScope,{...fl,grant_id:fresh.authorization!.id,input_hash:fresh.authorization!.input_hash,...testIdentity});
+  await db.query('UPDATE runtime_shared_desks SET revision=revision+1');
+  await assert.rejects(gate.decide(privateScope,{...fl,invocation_id:'stale-shared',expected_version:fresh.activity.version,checkpoint:'Do not commit stale notes',decision:{action:'complete',summary:'Local work'},shared_desk:{expected_revision:fresh.model_input!.shared_desk!.revision,notes:'Stale overwrite',plan:''}}),{code:'shared_desk_revision_conflict'});
+  assert.equal((await restarted.desk(p)).shared_desk.plan,'Concurrent update');
+  assert.equal((await db.query('SELECT state FROM runtime_model_grants WHERE turn_id=$1',[fresh.turn.id])).rows[0].state,'started');
   const client=await db.connect();try{assert.equal(await initiativeDeliveryValid(client,{binding_id:group.id,autonomy_revision:1,autonomy_epoch:1,id:randomUUID()}),false);}finally{client.release();}
  }finally{await pool?.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
 });

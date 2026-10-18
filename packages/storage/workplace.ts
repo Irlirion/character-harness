@@ -7,18 +7,22 @@ import type {WorkDecision} from '../runtime/contracts.ts';
 
 /** Fixed owner policy: daytime in Germany, one wake / 2h, <=2 first posts / rolling day. */
 export function daytime(at:Date){const hour=Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Berlin',hour:'2-digit',hourCycle:'h23'}).format(at));return hour>=9&&hour<21;}
+export async function sharedDesk(db:Pick<pg.Pool,'query'>,characterId:string){
+ return (await db.query('SELECT revision,notes,plan FROM runtime_shared_desks WHERE character_id=$1',[characterId])).rows[0]??{revision:1,notes:'',plan:''};
+}
 export async function deskContext(db:Pick<pg.Pool,'query'>,p:Principal){
+ const shared_desk=await sharedDesk(db,p.characterId);
  const desk=(await db.query('SELECT revision,notes,plan FROM runtime_desks WHERE character_id=$1 AND audience_id=$2',[p.characterId,p.audienceId])).rows[0]??{revision:1,notes:'',plan:''};
  const a=(await db.query(`SELECT a.revision,b.id,t.observation_gap,t.last_poll_at FROM runtime_autonomy a JOIN telegram_bindings b ON b.id=a.binding_id JOIN telegram_accounts t ON t.bot_id=b.bot_id
  WHERE b.character_id=$1 AND b.audience_id=$2 AND b.enabled AND b.kind='group' AND a.enabled`,[p.characterId,p.audienceId])).rows[0];
- if(!a)return {desk};
+ if(!a)return {desk,shared_desk};
  const messages=(await db.query(`SELECT text,incoming,observed_at FROM telegram_messages WHERE binding_id=$1
  ORDER BY seq DESC LIMIT 8`,[a.id])).rows.reverse();
- return {desk,autonomy:{revision:a.revision,posting_allowed:true,observed_at:new Date().toISOString(),
+ return {desk,shared_desk,autonomy:{revision:a.revision,posting_allowed:true,observed_at:new Date().toISOString(),
  context:JSON.stringify({observation_gap:a.observation_gap,messages:messages.map(m=>({text:m.text.slice(0,500),incoming:m.incoming,at:new Date(m.observed_at).toISOString()}))})}};
 }
 // Observation timestamp is not authority. Contents, revisions and scope are bound exactly.
-export function deskFingerprint(c:any){return fingerprint({desk:c.desk,autonomy:c.autonomy?{...c.autonomy,observed_at:undefined}:undefined});}
+export function deskFingerprint(c:any){return fingerprint({desk:c.desk,shared_desk:c.shared_desk,autonomy:c.autonomy?{...c.autonomy,observed_at:undefined}:undefined});}
 export async function scheduleAutonomy(db:pg.PoolClient,p:Principal,now:Date){
  if(!daytime(now))return;
  const rows=(await db.query(`SELECT a.*,b.audience_id FROM runtime_autonomy a JOIN telegram_bindings b ON b.id=a.binding_id
@@ -31,7 +35,7 @@ export async function scheduleAutonomy(db:pg.PoolClient,p:Principal,now:Date){
   if((await db.query("SELECT 1 FROM runtime_activities WHERE character_id=$1 AND audience_id=$2 AND origin='self' AND status NOT IN ('completed','failed','cancelled') LIMIT 1",[p.characterId,a.audience_id])).rowCount)continue;
   if((await db.query("SELECT count(*)::int n FROM runtime_activities WHERE character_id=$1 AND status NOT IN ('completed','failed','cancelled')",[p.characterId])).rows[0].n>=100)continue;
   const id=randomUUID(),key='self:'+randomUUID();
-  const objective='Review your scoped desk and group context. Choose worthwhile local work consistent with your persona, maintain notes and plan, or remain silent. Propose a first message only if it adds value. Finish this wake with a truthful summary.';
+  const objective='Review your character-wide shared desk, scoped notes and group context. Maintain common non-sensitive goals/plans in shared_desk so Minecraft and Telegram can coordinate; retain private details only in the scoped desk. Choose worthwhile local work consistent with your persona, maintain notes and plan, or remain silent. Propose a first message only if it adds value. Finish this wake with a truthful summary.';
   await db.query(`INSERT INTO runtime_activities(id,character_id,audience_id,origin,requested_by,invocation_id,create_payload,objective,max_turns)
    VALUES($1,$2,$3,'self','runtime',$4,$5,$6,1)`,[id,p.characterId,a.audience_id,key,JSON.stringify({schedule_revision:a.revision}),objective]);
   await db.query(`INSERT INTO runtime_wakeups(id,character_id,audience_id,activity_id,dedup_key,kind,available_at) VALUES($1,$2,$3,$4,'created','created',$5)`,[randomUUID(),p.characterId,a.audience_id,id,now]);
@@ -40,9 +44,16 @@ export async function scheduleAutonomy(db:pg.PoolClient,p:Principal,now:Date){
 }
 export async function commitDesk(db:pg.PoolClient,p:Principal,b:WorkDecision,activity:any,approved:boolean,state:any){
  if(activity.origin==='self'&&b.decision.action!=='complete')throw new DomainError('self_wake_must_complete');
- if(!b.desk&&!b.initiative)return;
+ if(!b.desk&&!b.shared_desk&&!b.initiative)return;
  if(!approved)throw new DomainError('runtime_approval_invalid');
  const g=(await db.query('SELECT * FROM runtime_model_grants WHERE turn_id=$1',[b.turn_id])).rows[0];
+ if(b.shared_desk){
+  if(!g?.approved_input?.shared_desk||b.shared_desk.expected_revision!==g.approved_input.shared_desk.revision||secretDetected(b.shared_desk))throw new DomainError('shared_desk_revision_conflict');
+  await db.query('INSERT INTO runtime_shared_desks(character_id) VALUES($1) ON CONFLICT DO NOTHING',[p.characterId]);
+  const changed=await db.query(`UPDATE runtime_shared_desks SET notes=$3,plan=$4,revision=revision+1,source_turn_id=$5,updated_at=now()
+   WHERE character_id=$1 AND revision=$2`,[p.characterId,b.shared_desk.expected_revision,b.shared_desk.notes,b.shared_desk.plan,b.turn_id]);
+  if(!changed.rowCount)throw new DomainError('shared_desk_revision_conflict');
+ }
  if(b.desk){
   if(!g?.approved_input?.desk||b.desk.expected_revision!==g.approved_input.desk.revision)throw new DomainError('desk_revision_conflict');
   await db.query('INSERT INTO runtime_desks(character_id,audience_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[p.characterId,p.audienceId]);

@@ -29,6 +29,7 @@ export type CoreDeps = {
   ingest: (p: Principal, event: any) => Promise<{ inserted: boolean; event_id: string | null }>;
   nextEvent: (p: Principal) => Promise<any>;
   recentConversation: (p: Principal, currentEventId: string) => Promise<any>;
+  loadSharedDesk?: (p:Principal)=>Promise<{revision:number;notes:string;plan:string}>;
   loadSocialMemory?: (p: Principal, event: any) => Promise<SocialContextInput>;
   inspectEvent?: (p: Principal, eventId?: string) => Promise<any>;
   stageMemory?: (p: Principal, eventId: string, epoch: number, invocationId: string, proposal: unknown) => Promise<any>;
@@ -147,7 +148,7 @@ app.get('/owner/inspect-context', async req => {
     deps.loadSocialMemory?deps.loadSocialMemory(principal,event):Promise.resolve(emptySocialContext())
   ]);
   const bounded=boundSocialContext(social);
-  const turnInput=makeTurnInput(event,memories,recent,await currentWorldObservation(),bounded);
+  const turnInput=makeTurnInput(event,memories,recent,await currentWorldObservation(),bounded,await deps.loadSharedDesk?.(principal));
   return {event_id:event.id,turn_input:turnInput,memory_instructions:memoryInstructions,response_instructions:responseInstructions,diagnostics:{
     reconstruction:'current_scoped_memory_for_selected_pending_event',
     block_chars:{event:JSON.stringify(turnInput.event).length,memories:JSON.stringify(turnInput.memories).length,
@@ -268,7 +269,7 @@ app.get('/engine/input', async (_req, reply) => {
   const memories=await search(scoped,'');
   const social_memory=currentEvent?boundSocialContext(deps.loadSocialMemory?await deps.loadSocialMemory(scoped,currentEvent):emptySocialContext()):undefined;
   const world_observation=currentEvent&&currentEvent.channel!=='telegram'?await currentWorldObservation():undefined;
-  const turn_input=currentEvent?makeTurnInput(currentEvent,memories,recent_conversation,world_observation,social_memory):null;
+  const turn_input=currentEvent?makeTurnInput(currentEvent,memories,recent_conversation,world_observation,social_memory,await deps.loadSharedDesk?.(scoped)):null;
   return { character: state, audience_id: scoped.audienceId,
     event: currentEvent, memories, recent_conversation, social_memory, world_observation, turn_input, memory_instructions:memoryInstructions,response_instructions:responseInstructions };
 });

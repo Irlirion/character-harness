@@ -68,3 +68,12 @@ test('turn input carries the current bounded world observation when core marks i
     event:{text:'кто рядом?'},memories:[],recent_conversation:[],world_observation:observation
   });
 });
+
+
+test('common desk is passed to both channel inputs independently of private memories',()=>{
+ const desk={revision:2,notes:'My general creative interests',plan:'Sketch a bridge'};
+ for(const channel of ['telegram','minecraft']){
+  const result=makeTurnInput({author_id:'external',channel},[{text:channel+' only'}],[],undefined,undefined,desk);
+  assert.deepEqual(result.agent_desk,desk);assert.equal(result.memories[0].text,channel+' only');
+ }
+});
