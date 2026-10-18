@@ -14,19 +14,19 @@ const rules='Synthetic fixture rules, not production policy. '.repeat(4),payload
 const envelope={protocol:'runtime-review.v1',rules,rules_hash:fingerprint(rules),payload,payload_hash:fingerprint(payload),policy_version:'test.v1',phase:'input'};
 test('Codex reviewer returns bound structured decision and denies all tool paths',async()=>{
  for(const mode of ['model','deny','needs_review','unsafe','wrongprofile','instructions','tool','native','invalid','fail','foreign','oversize','missing','duplicate']){
-  const rpc=new CodexRpc(process.execPath,'/private/tmp','/private/tmp',[fixture]);
+  const rpc=new CodexRpc(process.execPath,tmpdir(),tmpdir(),[fixture]);
   try{
-   await rpc.initialize();const result=runCodexReview(rpc,'/private/tmp',mode,envelope,AbortSignal.timeout(3000));
+   await rpc.initialize();const result=runCodexReview(rpc,tmpdir(),mode,envelope,AbortSignal.timeout(3000));
    if(['model','deny','needs_review'].includes(mode))assert.deepEqual(await result,{verdict:mode==='model'?'allow':mode,rule_id:'synthetic_test_only',payload_hash:envelope.payload_hash,policy_version:'test.v1'});
    else await assert.rejects(result);
   }finally{rpc.close();}
  }
 });
 test('Codex reviewer rejects altered source before RPC and interrupts cancellation',async()=>{
- const rpc=new CodexRpc(process.execPath,'/private/tmp','/private/tmp',[fixture]);
+ const rpc=new CodexRpc(process.execPath,tmpdir(),tmpdir(),[fixture]);
  try{
-  await rpc.initialize();await assert.rejects(runCodexReview(rpc,'/private/tmp','model',{...envelope,rules_hash:'0'.repeat(64)},new AbortController().signal),/reviewer_input_binding/);
-  await assert.rejects(runCodexReview(rpc,'/private/tmp','hang',envelope,AbortSignal.timeout(100)),/abort|revoked/i);
+  await rpc.initialize();await assert.rejects(runCodexReview(rpc,tmpdir(),'model',{...envelope,rules_hash:'0'.repeat(64)},new AbortController().signal),/reviewer_input_binding/);
+  await assert.rejects(runCodexReview(rpc,tmpdir(),'hang',envelope,AbortSignal.timeout(100)),/abort|revoked/i);
  }finally{rpc.close();}
 });
 test('standalone reviewer verifies pinned binary, config and operator attestation before serving',async()=>{

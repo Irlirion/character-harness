@@ -1,3 +1,4 @@
+import {tmpdir} from 'node:os';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
@@ -5,7 +6,7 @@ import { createProcessReviewer } from '../packages/runtime/reviewer.ts';
 import { fingerprint,reviewContent } from '../packages/runtime/policy.ts';
 import { testProfile } from './fixtures/runtime-policy.ts';
 const rules='Synthetic fixture rules for testing only. '.repeat(4);
-const config=(mode='ok')=>({executable:process.execPath,args:[fileURLToPath(new URL('./fixtures/runtime-reviewer-child.mjs',import.meta.url)),mode],cwd:'/private/tmp',rules,rules_hash:fingerprint(rules),policy_versions:['test.v1'],privacy_reviewed:true,expires_at:new Date(Date.now()+60000).toISOString(),timeout_ms:2000,max_requests_24h:10});
+const config=(mode='ok')=>({executable:process.execPath,args:[fileURLToPath(new URL('./fixtures/runtime-reviewer-child.mjs',import.meta.url)),mode],cwd:tmpdir(),rules,rules_hash:fingerprint(rules),policy_versions:['test.v1'],privacy_reviewed:true,expires_at:new Date(Date.now()+60000).toISOString(),timeout_ms:2000,max_requests_24h:10});
 const req={phase:'input' as const,payload:{text:'safe'},payload_hash:fingerprint({text:'safe'}),policy_version:'test.v1'};
 test('review bridge validates config, binding and strict bounded response',async()=>{
  let permits=0;const permit=async()=>{permits++;return true;};
@@ -67,4 +68,19 @@ test('Unix reviewer bridge kills surviving descendants after successful exit',{s
   assert.equal((await createProcessReviewer(c,async()=>true)(req,new AbortController().signal)).verdict,'allow');
   await new Promise(resolve=>setTimeout(resolve,600));await assert.rejects(access(marker));
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('owner review reads and retries share a bounded rate budget before storage access',async()=>{
+ const {runtimeApp,runtimeTokens}=await import('./fixtures/runtime-app.ts');
+ const {RuntimePolicyGate}=await import('../packages/runtime/gate.ts');let calls=0;
+ const policy=new RuntimePolicyGate({} as any,{reviewQueue:async()=>{calls++;return [];},retryReview:async()=>{calls++;return {queued:true};}} as any);
+ const app=runtimeApp({runtimeEngine:{} as any,runtimePolicy:policy});
+ try{
+  const headers={authorization:`Bearer ${runtimeTokens.owner}`};
+  for(let i=0;i<120;i++)assert.equal((await app.inject({url:'/owner/runtime-reviews',headers})).statusCode,200);
+  assert.equal(calls,120);
+  assert.equal((await app.inject({url:'/owner/runtime-reviews',headers})).statusCode,429);
+  assert.equal((await app.inject({method:'POST',url:'/owner/runtime-reviews/retry',headers,payload:{}})).statusCode,429);
+  assert.equal(calls,120);
+ }finally{await app.close();}
 });

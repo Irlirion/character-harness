@@ -1,3 +1,4 @@
+import {tmpdir} from 'node:os';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
@@ -150,7 +151,7 @@ test('durable runtime policy bindings and resource accounting',{skip:!process.en
   await reset();
   await t.test('configured bridge integrates with input/output gates and durable reviewer budget',async()=>{
    await auth.installProfile(p,testProfile());await assign();const rules='Synthetic fixture rules only. '.repeat(5);
-   const reviewer=createProcessReviewer({executable:process.execPath,args:[fileURLToPath(new URL('./fixtures/runtime-reviewer-child.mjs',import.meta.url))],cwd:'/private/tmp',
+   const reviewer=createProcessReviewer({executable:process.execPath,args:[fileURLToPath(new URL('./fixtures/runtime-reviewer-child.mjs',import.meta.url))],cwd:tmpdir(),
     policy_versions:['test.v1'],rules,rules_hash:fingerprint(rules),privacy_reviewed:true,expires_at:new Date(Date.now()+60000).toISOString(),timeout_ms:2000,max_requests_24h:2},
     signal=>auth.reserveReview(p,2,signal));
    const g=new RuntimePolicyGate(runtime,auth,reviewer,3000);const w=(await claim(g)).work!;assert.ok(w);await start(g,w);await g.decide(p,decide(w));

@@ -38,9 +38,9 @@ export function runtimeEngineRoutes(app:FastifyInstance,principal:Principal,poli
     if(['/engine/next_work','/engine/work_lease','/engine/work_decision','/engine/work_start','/engine/work_usage'].includes(req.routeOptions.url??'')||req.url.startsWith('/owner/runtime-'))reply.header('Cache-Control','no-store');
     return payload;
   });
-  if(policy?.overview)app.get('/owner/runtime-policy',async()=>policy.overview!(principal));
-  if(policy?.reviewQueue)app.get('/owner/runtime-reviews',async()=>({reviews:await policy.reviewQueue!(principal)}));
-  if(policy?.retryReview)app.post('/owner/runtime-reviews/retry',async req=>policy.retryReview!(principal,req.body));
+  if(policy?.overview)app.get('/owner/runtime-policy',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},async()=>policy.overview!(principal));
+  if(policy?.reviewQueue)app.get('/owner/runtime-reviews',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},async()=>({reviews:await policy.reviewQueue!(principal)}));
+  if(policy?.retryReview)app.post('/owner/runtime-reviews/retry',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},async req=>policy.retryReview!(principal,req.body));
   app.post('/engine/next_work',async req=>{
     const body=ClaimWorkSchema.parse(req.body);
     if(!policy)return {work:null,reason:'runtime_policy_blocked'};
