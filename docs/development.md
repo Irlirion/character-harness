@@ -92,3 +92,5 @@ owner в `/owner/runtime-policy`; у модели нет метода измен
 Подключение reviewer bridge и очередь повторной оценки описаны в [четвёртом срезе](runtime-2-review-workflow.md).
 
 Адаптер Codex и требования к его изоляции: [пятый срез](runtime-2-codex-reviewer.md).
+
+Управление activities из личного Telegram: [команды и границы](runtime-2-telegram.md).

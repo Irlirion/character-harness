@@ -10,20 +10,23 @@ import { CreateActivitySchema, ClaimWorkSchema, WorkDecisionSchema, ActivityPage
 /** Durable activities. Engine access is gated; runtime leases grant no legacy tools. */
 export class RuntimeStore {
   private pool: pg.Pool;
-  constructor(pool: pg.Pool) { this.pool = pool; }
+  private client?:pg.PoolClient;
+  constructor(pool: pg.Pool,client?:pg.PoolClient) { this.pool = pool;this.client=client; }
+  /** Participate in the authenticated Telegram update transaction, including offset/outbox. */
+  withTransaction(client:pg.PoolClient){return new RuntimeStore(this.pool,client);}
 
   private async transaction<T>(p: Principal, work: (db: pg.PoolClient, state: any) => Promise<T>): Promise<T> {
-    const db = await this.pool.connect();
+    const db = this.client??await this.pool.connect();
     try {
-      await db.query('BEGIN');
+      if(!this.client)await db.query('BEGIN');
       const state = (await db.query(`SELECT * FROM characters WHERE id=$1 FOR UPDATE`, [p.characterId])).rows[0];
       if (!state) throw new DomainError('character_not_found');
       state.db_now = (await db.query('SELECT clock_timestamp() AS current_time')).rows[0].current_time;
       const result = await work(db, state);
-      await db.query('COMMIT');
+      if(!this.client)await db.query('COMMIT');
       return result;
-    } catch (error) { await db.query('ROLLBACK'); throw error; }
-    finally { db.release(); }
+    } catch (error) { if(!this.client)await db.query('ROLLBACK'); throw error; }
+    finally { if(!this.client)db.release(); }
   }
 
   private async activity(db: pg.PoolClient, p: Principal, id: string) {
@@ -69,7 +72,7 @@ export class RuntimeStore {
 
   async list(p: Principal, limit = 20, offset = 0) {
     ({limit,offset} = ActivityPageSchema.parse({limit,offset}));
-    return (await this.pool.query(`SELECT id,objective,origin,requested_by,status,version,max_turns,turns_used,
+    return (await (this.client??this.pool).query(`SELECT id,objective,origin,requested_by,status,version,max_turns,turns_used,
       coalesce((SELECT h.rule_id FROM runtime_policy_holds h JOIN runtime_policy_current c ON c.character_id=h.character_id AND c.version=h.policy_version
         WHERE h.activity_id=runtime_activities.id AND h.activity_version=runtime_activities.version),
         CASE WHEN turns_used>=max_turns AND status IN ('ready','waiting_time','needs_input') THEN 'activity_turn_budget' END) AS blocked_reason,
