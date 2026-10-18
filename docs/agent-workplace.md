@@ -116,3 +116,26 @@ member scraping/enumeration, additional recipients or outbound posts are introdu
 Reference: https://core.telegram.org/bots/api#getchatadministrators,
 https://core.telegram.org/bots/api#getchatmembercount,
 https://core.telegram.org/bots/api#getchatmember.
+
+## Available participant profile (on demand)
+
+`telegram_member_profile(participant)` selects an exact username/display name, or a
+unique first name, among confirmed members already observed in this group or returned
+by its administrators API. Unknown names are not searched globally; duplicate names
+require clarification. Current membership is verified before reading private-profile
+fields. Source/target turn and binding authority is checked again after the read.
+
+The read returns only available bio, display label, group status and one visible avatar.
+Privacy/API failures are explicit; an absent field does not prove the user has none.
+Avatar downloading stays inside the worker: fixed Telegram origin, no redirects,
+20-second operation deadline, 256 KiB limit and PNG/JPEG validation. Token-bearing file
+URLs/IDs are never returned. MCP returns native image content, carried as actual image
+input to Codex/Pi. No face identification, sensitive-attribute inference or following
+instructions embedded in profiles/images. No background/profile cache or new table;
+ordinary provider/conversation retention still applies. Routine member-list questions
+must not fetch individual profiles unless asked.
+
+Sources: https://core.telegram.org/bots/api#getuserprofilephotos,
+https://core.telegram.org/bots/api#getchat, https://core.telegram.org/bots/api#getfile;
+Codex app-server image-content schema verified against the installed pinned version
+and official documentation https://learn.chatgpt.com/docs/app-server.

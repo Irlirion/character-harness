@@ -1,3 +1,4 @@
+import {profileToolContent} from '../../packages/telegram/profile-tool-content.ts';
 import { RuntimeConsumer } from '../../packages/runtime/consumer.ts';
 import { runtimeEngineEnabled, runtimeRequestTimeout } from '../../packages/runtime/protocol.ts';
 import { runPiPlanning } from '../../packages/runtime/pi-runner.ts';
@@ -67,7 +68,7 @@ while (!stopped) {
     const turnHeaders={...headers,'X-Harness-Event':input.event.id,'X-Harness-Epoch':String(input.character.epoch)};
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { fetch: coreFetch, requestInit: { headers:turnHeaders } }));
     const catalog = await client.listTools();
-    const approved = new Set(['agent_get_status', 'agent_observe', 'memory_search', 'memory_propose', 'memory_stage_delta', 'memory_social_list', 'agent_walk', 'agent_turn', 'agent_action_status','telegram_read_history','telegram_group_participants','telegram_send_group','telegram_group_delivery']);
+    const approved = new Set(['agent_get_status', 'agent_observe', 'memory_search', 'memory_propose', 'memory_stage_delta', 'memory_social_list', 'agent_walk', 'agent_turn', 'agent_action_status','telegram_read_history','telegram_group_participants','telegram_member_profile','telegram_send_group','telegram_group_delivery']);
     if (catalog.tools.some(t => !approved.has(t.name))) throw new Error('Unexpected tool catalog');
     let finishDecision:TurnFinishDecision|undefined;
     const customTools: ToolDefinition[] = catalog.tools.map<ToolDefinition>(tool => ({
@@ -87,6 +88,7 @@ while (!stopped) {
           arguments_.expected_epoch = input.character.epoch;
         }
         const output = await client.callTool({ name: tool.name, arguments: arguments_ }, undefined, { signal });
+        if(tool.name==='telegram_member_profile')return {content:profileToolContent(output),details:{mcp:{isError:output.isError}}};
         // Transport model output as text; core remains authoritative about tool errors.
         return { content: [{ type: 'text', text: JSON.stringify(output) }], details: { mcp: output } };
       }

@@ -1,3 +1,4 @@
+import {MemberProfileSchema} from '../../packages/telegram/member-profile.ts';
 import {GroupDirectorySchema} from '../../packages/telegram/group-directory.ts';
 import {sharedDesk} from '../../packages/storage/workplace.ts';
 import { RuntimeAuthorizationStore } from '../../packages/storage/runtime-authorization.ts';
@@ -47,6 +48,9 @@ const reviewer=reviewerConfig&&runtimeAuth?createProcessReviewer(reviewerConfig,
 const telegram=telegramToken?new TelegramStore(pool,character.id,runtime,reviewer?{reviewer,timeoutMs:reviewerConfig!.timeout_ms+100}:undefined,async(chat_id,known_user_ids)=>{
  const r=await fetch('http://telegram:3001/group-participants',{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${telegramToken}`,'Content-Type':'application/json'},body:JSON.stringify({chat_id,known_user_ids}),signal:AbortSignal.timeout(20000)});
  if(!r.ok)throw new Error('directory_worker_unavailable');return GroupDirectorySchema.parse(await r.json());
+},async(chat_id,known_user_ids,selector)=>{
+ const r=await fetch('http://telegram:3001/member-profile',{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${telegramToken}`,'Content-Type':'application/json'},body:JSON.stringify({chat_id,known_user_ids,selector}),signal:AbortSignal.timeout(25000)});
+ if(!r.ok)throw new Error('profile_worker_unavailable');return MemberProfileSchema.parse(await r.json());
 }):undefined;
 const app = buildApp({
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken,telegram:telegramToken },

@@ -1,3 +1,4 @@
+import {MemberProfileSchema,type ProfileReader} from '../telegram/member-profile.ts';
 import {GroupDirectorySchema,type GroupReader} from '../telegram/group-directory.ts';
 import {DirectedTelegram,type DirectedReviewer} from './telegram-directed.ts';
 import {configureAutonomy} from './workplace.ts';
@@ -16,9 +17,10 @@ export class TelegramStore {
   private pool:pg.Pool;
   readonly characterId:string;
   private runtime?:RuntimeStore;
-  constructor(pool:pg.Pool, characterId:string,runtime?:RuntimeStore,review?:DirectedReviewer,groupReader?:GroupReader) {this.groupReader=groupReader;this.pool=pool;this.characterId=characterId;this.runtime=runtime;this.directed=new DirectedTelegram(pool,characterId,review);}
+  constructor(pool:pg.Pool, characterId:string,runtime?:RuntimeStore,review?:DirectedReviewer,groupReader?:GroupReader,profileReader?:ProfileReader) {this.profileReader=profileReader;this.groupReader=groupReader;this.pool=pool;this.characterId=characterId;this.runtime=runtime;this.directed=new DirectedTelegram(pool,characterId,review);}
   private directed:DirectedTelegram;
   private groupReader?:GroupReader;
+  private profileReader?:ProfileReader;
   async canSendGroup(p:Principal,eventId:string,epoch:number){return this.directed.available(p,eventId,epoch);}
   async sendGroup(p:Principal,eventId:string,epoch:number,text:string){return this.directed.send(p,eventId,epoch,text);}
   async groupDelivery(p:Principal,eventId:string,epoch:number,id:string){return this.directed.status(p,eventId,epoch,id);}
@@ -59,6 +61,14 @@ export class TelegramStore {
     if(before.source_id!==after.source_id||before.source_revision!==after.source_revision||before.target_id!==after.target_id||before.target_revision!==after.target_revision)throw new DomainError('directory_authority_stale');
     return {...data,source:'telegram_bot_api',target:before.source_id===before.target_id?'current_group':'configured_group',observed_at:new Date().toISOString(),complete:false,
       limitation:'Bot API has no complete member-list method. Administrators and checked known message authors are partial evidence, not all members. Display names are unverified identities.'};
+  }
+  async memberProfile(p:Principal,eventId:string,epoch:number,selector:string){
+    if(!this.profileReader||!selector.trim()||selector.length>128)throw new DomainError('member_profile_unavailable');
+    const before=await this.directoryContext(p,eventId,epoch);let data;
+    try{data=MemberProfileSchema.parse(await this.profileReader(before.chat_id,before.known_ids,selector));}catch{throw new DomainError('member_profile_unavailable');}
+    const after=await this.directoryContext(p,eventId,epoch);
+    if(before.source_id!==after.source_id||before.source_revision!==after.source_revision||before.target_id!==after.target_id||before.target_revision!==after.target_revision)throw new DomainError('directory_authority_stale');
+    return {...data,observed_at:new Date().toISOString(),source:'telegram_bot_api'};
   }
   async register(botId:string, username:string) {
     return this.tx(async db=>{
