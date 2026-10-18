@@ -42,3 +42,6 @@ export function runtimeEngineEnabled(value: string | undefined): boolean {
 
 export const StartWorkSchema=WorkLeaseSchema.extend({grant_id:z.uuid(),input_hash:z.string().regex(/^[a-f0-9]{64}$/),engine:z.enum(['pi','codex']),model:z.string().min(1).max(200)}).strict();
 export const UsageSchema=WorkLeaseSchema.extend({total_tokens:z.number().int().min(0).max(1000000000).nullable(),source:z.enum(['pi_session','codex_notification'])}).strict();
+
+/** Reviewer-backed claim/commit can take longer than ordinary core reads. */
+export function runtimeRequestTimeout(path:string,ordinaryMs:number){return path==='/engine/next_work'||path==='/engine/work_decision'?65000:ordinaryMs;}

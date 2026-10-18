@@ -1,5 +1,5 @@
 import { RuntimeConsumer } from '../../packages/runtime/consumer.ts';
-import { runtimeEngineEnabled } from '../../packages/runtime/protocol.ts';
+import { runtimeEngineEnabled, runtimeRequestTimeout } from '../../packages/runtime/protocol.ts';
 import { runPiPlanning } from '../../packages/runtime/pi-runner.ts';
 import { TELEGRAM_INSTRUCTIONS,parseTelegramDecision } from '../../packages/telegram/domain.ts';
 import { coreBaseUrl, coreFetch } from '../../packages/domain/core-http.ts';
@@ -34,7 +34,7 @@ process.once('SIGTERM', () => { stopped = true; runtimeStop.abort(); void active
 process.once('SIGINT', () => { stopped = true; runtimeStop.abort(); void active?.abort(); });
 const wait = () => new Promise(resolve => setTimeout(resolve, 1500));
 async function request(path: string, body?: unknown) {
-  const response = await coreFetch(`${base}${path}`, { headers, method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(15000) });
+  const response = await coreFetch(`${base}${path}`, { headers, method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(runtimeRequestTimeout(path,15000)) });
   if (!response.ok) throw new Error(`Core request failed: ${response.status}`);
   return response.json();
 }

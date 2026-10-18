@@ -1,5 +1,5 @@
 import { RuntimeConsumer } from '../../packages/runtime/consumer.ts';
-import { runtimeEngineEnabled } from '../../packages/runtime/protocol.ts';
+import { runtimeEngineEnabled, runtimeRequestTimeout } from '../../packages/runtime/protocol.ts';
 import { runCodexPlanning } from '../../packages/runtime/codex-runner.ts';
 import { runImageLoop } from './images.ts';
 import { IMAGE_INSTRUCTIONS } from '../../packages/images/domain.ts';
@@ -24,7 +24,7 @@ const rpc=new CodexRpc(process.env.CODEX_BIN??'/app/node_modules/.bin/codex',cwd
 const base=coreBaseUrl(process.env.CORE_URL??'http://core:3000');
 const headers={Authorization:`Bearer ${secret('ENGINE_TOKEN')}`,'Content-Type':'application/json'};
 async function api(path:string,body?:unknown){
- const r=await coreFetch(base+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000)});
+ const r=await coreFetch(base+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(runtimeRequestTimeout(path,5000))});
  if(!r.ok)throw new Error('core_request_failed');return r.json();
 }
 let stopped=false;let threadId:string|undefined;let turnId:string|undefined;

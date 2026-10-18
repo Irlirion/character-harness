@@ -14,6 +14,7 @@ export interface RuntimeExecutionGate {
  decide(p:Principal,input:unknown):Promise<unknown>;
  usage(p:Principal,input:unknown):Promise<unknown>;
  overview?(p:Principal):Promise<unknown>;
+ executionEnabled?(p:Principal):Promise<boolean>;
  reviewQueue?(p:Principal):Promise<unknown>;
  retryReview?(p:Principal,input:unknown):Promise<unknown>;
 }
@@ -75,6 +76,7 @@ export class RuntimePolicyGate implements RuntimeExecutionGate {
  }
  async reviewQueue(p:Principal){return this.auth.reviewQueue(p);}
  async retryReview(p:Principal,input:unknown){return this.auth.retryReview(p,z.object({request_id:z.uuid(),activity_id:z.uuid(),activity_version:z.number().int().positive(),policy_version:z.string().min(1).max(100),payload_hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(input));}
+ async executionEnabled(p:Principal){const current=await this.auth.profile(p);return !!this.reviewer&&!!current&&profileUsable(current.profile,Date.now());}
  async overview(p:Principal){return this.auth.overview(p);}
  async usage(p:Principal,input:unknown){return this.auth.usage(p,UsageSchema.parse(input));}
 }

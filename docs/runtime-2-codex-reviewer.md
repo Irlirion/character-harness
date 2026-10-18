@@ -140,3 +140,12 @@ Sandbox overrides не передаются, чтобы не заменить э
 180 тестов и typecheck прошли. Регрессии покрывают допустимость unified_exec=true
 при shell_tool=false, отказ при shell_tool=true, неверный permission profile и
 посторонние instructionSources. Временные контейнеры удалены после завершения.
+
+## Reviewer-backed production requests
+
+Engine claim/decision HTTP requests use a 65-second timeout so a bounded reviewer
+can finish before the client abandons the request. Ordinary core reads/lease checks
+retain their existing short timeouts. Owner status reports autonomous execution
+configured only when a reviewer dependency and a currently usable operator profile
+are both present; it does not assert that a consumer process is healthy or that a
+particular operation is permitted.
