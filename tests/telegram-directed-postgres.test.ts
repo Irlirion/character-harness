@@ -30,7 +30,7 @@ test('natural-language private owner group sends are reviewed, scoped and durabl
   await t.test('private owner MCP exposes send/status and executes the ordinary dialogue tool path',async()=>{
    await reset();const e=await event();const tokens={engine:'e'.repeat(64),owner:'o'.repeat(64),audio:'a'.repeat(64),bridge:'b'.repeat(64),telegram:'t'.repeat(64)};
    const unused=async()=>{throw new Error('unused');};
-   const app=buildApp({principal:p,tokens,allowSystemChatPublicDemo:false,telegram:tg,deps:{pool,status:unused,search:unused,remember:unused,control:unused,ingest:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused}});
+   const app=buildApp({principal:p,tokens,allowSystemChatPublicDemo:false,telegram:tg,deps:{pool,status:unused,search:unused,remember:unused,control:unused,ingest:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,enqueueClientAction:unused,clientActionStatus:unused,clientActionLease:unused,claimClientAction:unused,finishClientAction:unused,saveWorldObservation:unused,latestWorldObservation:unused,cancelClientActions:unused}});
    try{
     const base=await app.listen({port:0,host:'127.0.0.1'});
     const headers={'Content-Type':'application/json',authorization:'Bearer '+tokens.engine,'x-harness-event':e.id,'x-harness-epoch':String(e.epoch),accept:'application/json, text/event-stream'};
