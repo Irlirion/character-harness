@@ -1,5 +1,7 @@
+import { runtimeOwnerRoutes, runtimeEngineRoutes, type RuntimeOwnerStore, type RuntimeEngineStore, type RuntimePlanningPolicy } from './runtime.ts';
 import type { ImageStore } from '../../packages/storage/images.ts';
 import { ImageSchema } from '../../packages/images/domain.ts';
+import {directedErrorDetail} from '../../packages/storage/telegram-directed.ts';
 import { telegramRoutes } from './telegram.ts';
 import type { TelegramStore } from '../../packages/storage/telegram.ts';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -28,6 +30,7 @@ export type CoreDeps = {
   ingest: (p: Principal, event: any) => Promise<{ inserted: boolean; event_id: string | null }>;
   nextEvent: (p: Principal) => Promise<any>;
   recentConversation: (p: Principal, currentEventId: string) => Promise<any>;
+  loadSharedDesk?: (p:Principal)=>Promise<{revision:number;notes:string;plan:string}>;
   loadSocialMemory?: (p: Principal, event: any) => Promise<SocialContextInput>;
   inspectEvent?: (p: Principal, eventId?: string) => Promise<any>;
   stageMemory?: (p: Principal, eventId: string, epoch: number, invocationId: string, proposal: unknown) => Promise<any>;
@@ -53,6 +56,9 @@ export type BuildAppOptions = {
   allowSystemChatPublicDemo: boolean;
   allowClientWorld?: boolean;
   deps: CoreDeps;
+  runtime?: RuntimeOwnerStore;
+  runtimeEngine?: RuntimeEngineStore;
+  runtimePolicy?: RuntimePlanningPolicy;
   telegram?:TelegramStore;
   images?:ImageStore;
   memoryInstructions?: string;
@@ -64,7 +70,7 @@ function emptySocialContext(): SocialContextInput {
 }
 
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
-export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps, memoryInstructions = '', responseInstructions = '', telegram, images }: BuildAppOptions): FastifyInstance {
+export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps, memoryInstructions = '', responseInstructions = '', telegram, images, runtime, runtimeEngine, runtimePolicy }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 // Roles share a token, so budget by role rather than IP or attacker-supplied headers.
 // Audio and action leases poll frequently; keep bridge event ingestion in its own budget.
@@ -116,6 +122,8 @@ app.setErrorHandler((error, _req, reply) => {
   app.log.error({ name: error instanceof Error ? error.name : 'unknown' }, 'Request failed');
   return reply.code(500).send({ error: 'internal_error' });
 });
+if (runtime) runtimeOwnerRoutes(app, principal, runtime);
+if (runtimeEngine) runtimeEngineRoutes(app,principal,runtimePolicy);
 if(telegram)telegramRoutes(app,telegram);
 if(images){
  app.get('/owner/images',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},()=>images.status());
@@ -130,7 +138,7 @@ app.get('/health', async () => ({ alive: true }));
 app.get('/ready', async () => { await pool.query('SELECT 1'); return { ready: true }; });
 app.get('/engine/status', async () => status(principal));
 // The global handler runs first to retain the shared role budget; route config also exposes the limit to static analysis.
-app.get('/owner/status', {preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}}, async () => ({ character: await status(principal), audience: principal.audienceId, adapters: { minecraft: 'not_implemented', telegram: telegram?await telegram.overview():'not_implemented', voice: 'not_implemented' } }));
+app.get('/owner/status', {preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}}, async () => ({ character: await status(principal), audience: principal.audienceId, runtime: { storage_enabled: !!runtime, protocol_enabled: !!runtimeEngine, autonomous_execution: runtimePolicy?.executionEnabled?await runtimePolicy.executionEnabled(principal):false, policy_gate: runtimePolicy?'installed':'unavailable' }, adapters: { minecraft: 'not_implemented', telegram: telegram?await telegram.overview():'not_implemented', voice: 'not_implemented' } }));
 app.get('/owner/inspect-context', async req => {
   if (!deps.inspectEvent) throw new DomainError('context_inspection_unavailable');
   const query=z.object({event_id:z.string().uuid().optional()}).strict().parse(req.query);
@@ -141,7 +149,7 @@ app.get('/owner/inspect-context', async req => {
     deps.loadSocialMemory?deps.loadSocialMemory(principal,event):Promise.resolve(emptySocialContext())
   ]);
   const bounded=boundSocialContext(social);
-  const turnInput=makeTurnInput(event,memories,recent,await currentWorldObservation(),bounded);
+  const turnInput=makeTurnInput(event,memories,recent,await currentWorldObservation(),bounded,await deps.loadSharedDesk?.(principal));
   return {event_id:event.id,turn_input:turnInput,memory_instructions:memoryInstructions,response_instructions:responseInstructions,diagnostics:{
     reconstruction:'current_scoped_memory_for_selected_pending_event',
     block_chars:{event:JSON.stringify(turnInput.event).length,memories:JSON.stringify(turnInput.memories).length,
@@ -262,7 +270,7 @@ app.get('/engine/input', async (_req, reply) => {
   const memories=await search(scoped,'');
   const social_memory=currentEvent?boundSocialContext(deps.loadSocialMemory?await deps.loadSocialMemory(scoped,currentEvent):emptySocialContext()):undefined;
   const world_observation=currentEvent&&currentEvent.channel!=='telegram'?await currentWorldObservation():undefined;
-  const turn_input=currentEvent?makeTurnInput(currentEvent,memories,recent_conversation,world_observation,social_memory):null;
+  const turn_input=currentEvent?makeTurnInput(currentEvent,memories,recent_conversation,world_observation,social_memory,await deps.loadSharedDesk?.(scoped)):null;
   return { character: state, audience_id: scoped.audienceId,
     event: currentEvent, memories, recent_conversation, social_memory, world_observation, turn_input, memory_instructions:memoryInstructions,response_instructions:responseInstructions };
 });
@@ -297,7 +305,7 @@ app.post('/engine/complete', async req => {
   }
   return complete(principal, body.event_id, text, body.epoch, speak, delta, diagnostic, body.memory_delta,decision,channel);
 });
-function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Principal=principal,isTelegram=false,guard:()=>Promise<unknown>=async()=>{}) {
+async function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Principal=principal,isTelegram=false,guard:()=>Promise<unknown>=async()=>{}) {
   const server = new McpServer({ name: 'character-harness', version: '0.1.0' });
   const originalRegister=server.registerTool.bind(server);
   server.registerTool=((name:any,config:any,callback:any)=>originalRegister(name,config,async(...args:any[])=>{await guard();return callback(...args);})) as typeof server.registerTool;
@@ -363,6 +371,20 @@ function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Principal
     catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
    });
   }
+  if(isTelegram&&telegram&&scope&&await telegram.canSendGroup(scopedPrincipal,scope.eventId,scope.epoch)){
+   server.registerTool('telegram_send_group',{description:'Send one short message to the single configured group on this verified private owner request, expressed in ordinary language. Choose useful text from the request/current context; no slash command required. Never copy private context unless owner requested that disclosure. Queued is not sent. Call telegram_group_delivery and confirm only state=sent. No arbitrary recipient. One message per owner event.',inputSchema:{text:z.string().trim().min(1).max(1000)}},async({text})=>{
+    try{return result(await telegram.sendGroup(scopedPrincipal,scope.eventId,scope.epoch,text));}catch(e){if(e instanceof DomainError)return {...result(directedErrorDetail(e)),isError:true};throw e;}
+   });
+   server.registerTool('telegram_group_delivery',{description:'Check a group send requested from this private owner chat. Only sent confirms actual Telegram acceptance. Pending/retry_wait means queued, unknown means do not retry, failed/cancelled/expired means not sent.',inputSchema:{id:z.uuid()}},async({id})=>{
+    try{return result(await telegram.groupDelivery(scopedPrincipal,scope.eventId,scope.epoch,id));}catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
+   });
+  }
+  if(isTelegram&&telegram&&scope&&await telegram.canReadGroup(scopedPrincipal,scope.eventId,scope.epoch))server.registerTool('telegram_group_participants',{description:'Query current available participants on demand: member count, administrators and checked known message authors. In a group reads this group; in the verified owner private chat reads the configured group. Not a complete roster. Call for questions about who is in the group and report available names/count and partial coverage. No numeric IDs or cross-channel identities. Does not save a member list.',inputSchema:{}},async()=>{
+   try{return result(await telegram.groupParticipants(scopedPrincipal,scope.eventId,scope.epoch));}catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
+  });
+  if(isTelegram&&telegram&&scope&&await telegram.canReadGroup(scopedPrincipal,scope.eventId,scope.epoch))server.registerTool('telegram_member_profile',{description:'Read available bio and current avatar of a named confirmed participant in this group/configured owner group, on demand only. Select by displayed name or @username, never numeric IDs. May return ambiguous/not_found or privacy/API errors. Photo is returned as an image you can inspect; absence is not proof of no photo. Never identify a real person from a face or infer sensitive attributes. No arbitrary-person search or profile storage.',inputSchema:{participant:z.string().trim().min(1).max(128)}},async({participant})=>{
+   try{const profile=await telegram.memberProfile(scopedPrincipal,scope.eventId,scope.epoch,participant);const {photo,...metadata}=profile;return {content:[{type:'text' as const,text:JSON.stringify({...metadata,photo_available:!!photo})},...(photo?[{type:'image' as const,data:photo.data,mimeType:photo.mime}]:[])]};}catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
+  });
   if(isTelegram && telegram)server.registerTool('telegram_read_history',{
     description:'Read the bounded local journal of this chat only; history may be incomplete.',
     inputSchema:{limit:z.number().int().min(1).max(20).default(20),before:z.string().regex(/^\d+$/).max(18).optional()}
@@ -380,7 +402,10 @@ app.post('/mcp', async (req, reply) => {
     const current=await telegram.scope(scope.eventId,scope.epoch);scopedPrincipal=current;isTelegram=current.channel==='telegram';
     guard=()=>telegram.scope(scope.eventId,scope.epoch);
   }
-  const server = gateway(scope,scopedPrincipal,isTelegram,guard);
+  const legacyGuard=guard;
+  guard=async()=>{if(runtimeEngine)await runtimeEngine.assertLegacyTurn(principal);await legacyGuard();};
+  if(runtimeEngine)await runtimeEngine.assertLegacyTurn(principal);
+  const server = await gateway(scope,scopedPrincipal,isTelegram,guard);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   reply.hijack();
   reply.raw.on('close', () => { void transport.close(); void server.close(); });

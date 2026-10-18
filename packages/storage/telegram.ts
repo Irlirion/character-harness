@@ -1,3 +1,10 @@
+import {MemberProfileSchema,type ProfileReader} from '../telegram/member-profile.ts';
+import {GroupDirectorySchema,type GroupReader} from '../telegram/group-directory.ts';
+import {DirectedTelegram,type DirectedReviewer} from './telegram-directed.ts';
+import {configureAutonomy} from './workplace.ts';
+import {handleRuntimeCommand,runtimeCommand,runtimeDeliveryValid} from '../telegram/runtime-commands.ts';
+import type {RuntimeStore} from './runtime.ts';
+import {fingerprint} from '../runtime/policy.ts';
 import { loadStagedSocialMemory, applySocialMemoryDelta } from './social-memory.ts';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
@@ -9,7 +16,14 @@ type DB = pg.PoolClient;
 export class TelegramStore {
   private pool:pg.Pool;
   readonly characterId:string;
-  constructor(pool:pg.Pool, characterId:string) {this.pool=pool;this.characterId=characterId;}
+  private runtime?:RuntimeStore;
+  constructor(pool:pg.Pool, characterId:string,runtime?:RuntimeStore,review?:DirectedReviewer,groupReader?:GroupReader,profileReader?:ProfileReader) {this.profileReader=profileReader;this.groupReader=groupReader;this.pool=pool;this.characterId=characterId;this.runtime=runtime;this.directed=new DirectedTelegram(pool,characterId,review);}
+  private directed:DirectedTelegram;
+  private groupReader?:GroupReader;
+  private profileReader?:ProfileReader;
+  async canSendGroup(p:Principal,eventId:string,epoch:number){return this.directed.available(p,eventId,epoch);}
+  async sendGroup(p:Principal,eventId:string,epoch:number,text:string){return this.directed.send(p,eventId,epoch,text);}
+  async groupDelivery(p:Principal,eventId:string,epoch:number,id:string){return this.directed.status(p,eventId,epoch,id);}
   private async tx<T>(fn:(db:DB, character:any)=>Promise<T>):Promise<T> {
     const db=await this.pool.connect();
     try {
@@ -18,6 +32,43 @@ export class TelegramStore {
       if (!c) throw new DomainError('character_not_found');
       const result=await fn(db,c); await db.query('COMMIT'); return result;
     } catch(e) { await db.query('ROLLBACK'); throw e; } finally {db.release();}
+  }
+  private async directoryContext(p:Principal,eventId:string,epoch:number){
+    return this.tx(async(db,c)=>{
+      assertActive(c,epoch);if(c.active_event_id!==eventId||!c.lease_until||new Date(c.lease_until)<=new Date())throw new DomainError('turn_not_current');
+      const source=(await db.query(`SELECT b.*,e.author_id FROM social_events e JOIN telegram_decisions d ON d.event_id=e.id JOIN telegram_bindings b ON b.id=d.binding_id
+        WHERE e.id=$1 AND e.character_id=$2 AND e.audience_id=$3 AND NOT e.processed AND b.enabled`,[eventId,this.characterId,p.audienceId])).rows[0];
+      if(p.characterId!==this.characterId||!source)throw new DomainError('directory_scope_denied');
+      let b=source;
+      if(source.kind==='private'){
+        if(!source.runtime_control||source.author_id!=='telegram:'+source.chat_id)throw new DomainError('directory_owner_required');
+        const groups=(await db.query("SELECT * FROM telegram_bindings WHERE character_id=$1 AND enabled AND kind='group'",[this.characterId])).rows;b=groups.length===1?groups[0]:null;
+      }
+      if(!b||b.kind!=='group')throw new DomainError('group_binding_required');
+      const ids=(await db.query(`SELECT substring(author_id from 10) AS id FROM telegram_messages
+        WHERE binding_id=$1 AND incoming AND author_id ~ '^telegram:[0-9]+$' AND observed_at>now()-interval '30 days'
+        GROUP BY author_id ORDER BY max(observed_at) DESC LIMIT 20`,[b.id])).rows.map(r=>r.id);
+      return {source_id:source.id,source_revision:source.revision,target_id:b.id,target_revision:b.revision,chat_id:b.chat_id,known_ids:ids};
+    });
+  }
+  async canReadGroup(p:Principal,eventId:string,epoch:number){
+    if(!this.groupReader)return false;try{await this.directoryContext(p,eventId,epoch);return true;}catch(e){if(e instanceof DomainError)return false;throw e;}
+  }
+  async groupParticipants(p:Principal,eventId:string,epoch:number){
+    const before=await this.directoryContext(p,eventId,epoch);if(!this.groupReader)throw new DomainError('group_directory_unavailable');
+    let data;try{data=GroupDirectorySchema.parse(await this.groupReader(before.chat_id,before.known_ids));}catch{throw new DomainError('group_directory_unavailable');}
+    const after=await this.directoryContext(p,eventId,epoch);
+    if(before.source_id!==after.source_id||before.source_revision!==after.source_revision||before.target_id!==after.target_id||before.target_revision!==after.target_revision)throw new DomainError('directory_authority_stale');
+    return {...data,source:'telegram_bot_api',target:before.source_id===before.target_id?'current_group':'configured_group',observed_at:new Date().toISOString(),complete:false,
+      limitation:'Bot API has no complete member-list method. Administrators and checked known message authors are partial evidence, not all members. Display names are unverified identities.'};
+  }
+  async memberProfile(p:Principal,eventId:string,epoch:number,selector:string){
+    if(!this.profileReader||!selector.trim()||selector.length>128)throw new DomainError('member_profile_unavailable');
+    const before=await this.directoryContext(p,eventId,epoch);let data;
+    try{data=MemberProfileSchema.parse(await this.profileReader(before.chat_id,before.known_ids,selector));}catch{throw new DomainError('member_profile_unavailable');}
+    const after=await this.directoryContext(p,eventId,epoch);
+    if(before.source_id!==after.source_id||before.source_revision!==after.source_revision||before.target_id!==after.target_id||before.target_revision!==after.target_revision)throw new DomainError('directory_authority_stale');
+    return {...data,observed_at:new Date().toISOString(),source:'telegram_bot_api'};
   }
   async register(botId:string, username:string) {
     return this.tx(async db=>{
@@ -63,6 +114,19 @@ export class TelegramStore {
       return binding;
     });
   }
+  async autonomy(bindingId:string,enabled:boolean){return this.tx(db=>configureAutonomy(db,this.characterId,bindingId,enabled));}
+  async runtimeControl(bindingId:string,enabled:boolean){
+    return this.tx(async db=>{
+      const b=(await db.query("SELECT * FROM telegram_bindings WHERE id=$1 AND character_id=$2 AND kind='private' FOR UPDATE",[bindingId,this.characterId])).rows[0];
+      if(!b)throw new DomainError('private_binding_required');
+      if(b.runtime_control===enabled)return {enabled};
+      await db.query('UPDATE telegram_bindings SET runtime_control=$2,revision=revision+1 WHERE id=$1',[bindingId,enabled]);
+      await db.query("UPDATE telegram_outbox SET state='cancelled' WHERE binding_id=$1 AND state IN ('pending','retry_wait')",[bindingId]);
+      await db.query('DELETE FROM social_memory_staging WHERE character_id=$1 AND event_id=(SELECT active_event_id FROM characters WHERE id=$1)',[this.characterId]);
+      await db.query('UPDATE characters SET epoch=epoch+1,lease_until=NULL,active_event_id=NULL WHERE id=$1',[this.characterId]);
+      return {enabled};
+    });
+  }
   async ingest(botId:string,owner:string,updates:any[]) {
     return this.tx(async(db,c)=>{
       const a=(await db.query(`SELECT * FROM telegram_accounts WHERE bot_id=$1 AND character_id=$2 AND poll_owner=$3 AND poll_until>now()`,[botId,this.characterId,owner])).rows[0];
@@ -96,7 +160,21 @@ export class TelegramStore {
               await db.query("UPDATE telegram_updates SET disposition=$3 WHERE bot_id=$1 AND update_id=$2",[botId,String(uid),fresh?'stored':'historical']);
               const recent=(await db.query(`SELECT count(*)::int AS n FROM social_events WHERE character_id=$1 AND audience_id=$2 AND author_id=$3 AND created_at>now()-interval '1 minute'`,[this.characterId,b.audience_id,m.authorId])).rows[0].n;
               if (added.rowCount && fresh && m.kind==='private' && recent>=10) await db.query('UPDATE telegram_messages SET consumed=true WHERE binding_id=$1 AND message_id=$2',[b.id,m.messageId]);
-              if (added.rowCount && fresh && m.kind==='private' && recent<10) await this.createDecision(db,b,[{...m,seq:added.rows[0].seq,message_id:m.messageId,author_id:m.authorId}],true);
+              if(added.rowCount&&fresh&&this.runtime&&runtimeCommand(m.text,a.username)){
+                await db.query('UPDATE telegram_messages SET consumed=true WHERE binding_id=$1 AND message_id=$2',[b.id,m.messageId]);
+                if(recent<10){
+                 const response=await handleRuntimeCommand(db,this.runtime,b,m,a.username);
+                 if(response?.text){
+                  await this.createDecision(db,b,[{...m,seq:added.rows[0].seq,message_id:m.messageId,author_id:m.authorId}],true);
+                  const d=(await db.query('SELECT event_id FROM telegram_decisions WHERE binding_id=$1 AND last_seq=$2',[b.id,added.rows[0].seq])).rows[0];
+                  await db.query('UPDATE social_events SET processed=true WHERE id=$1',[d.event_id]);
+                  await db.query("UPDATE telegram_decisions SET outcome='runtime_command' WHERE event_id=$1",[d.event_id]);
+                  const meta=response.delivery;
+                  await db.query(`INSERT INTO telegram_outbox(id,event_id,binding_id,revision,text,reply_to,direct,state,expires_at,runtime_activity_id,runtime_activity_version,runtime_turn_id,runtime_policy_version,runtime_profile_hash,runtime_text_hash)
+                   VALUES($1,$2,$3,$4,$5,$6,true,'pending',now()+interval '5 minutes',$7,$8,$9,$10,$11,$12)`,[randomUUID(),d.event_id,b.id,b.revision,response.text,m.messageId,meta?.activity_id??null,meta?.activity_version??null,meta?.turn_id??null,meta?.policy_version??null,meta?.profile_hash??null,meta?fingerprint(response.text):null]);
+                 }
+                }
+              }else if (added.rowCount && fresh && m.kind==='private' && recent<10) await this.createDecision(db,b,[{...m,seq:added.rows[0].seq,message_id:m.messageId,author_id:m.authorId}],true);
             }
           }
         }
@@ -206,6 +284,7 @@ export class TelegramStore {
         WHERE b.character_id=$1 AND b.enabled AND a.status='connected' AND (a.retry_at IS NULL OR a.retry_at<=now()) AND o.state IN ('pending','retry_wait')
         AND (o.retry_at IS NULL OR o.retry_at<=now()) ORDER BY o.created_at LIMIT 20`,[this.characterId])).rows;
       for(const job of jobs) {
+        if(!await runtimeDeliveryValid(db,job)){await db.query("UPDATE telegram_outbox SET state='cancelled' WHERE id=$1",[job.id]);continue;}
         const sameReply=job.image_job_id && (await db.query("SELECT 1 FROM telegram_outbox WHERE event_id=$1 AND image_job_id IS NULL AND state IN ('pending','sending','sent','retry_wait')",[job.event_id])).rowCount;
         if(!job.direct && !sameReply && !await this.initiativeAllowed(db,job.binding_id,job.id)) {
           await db.query("UPDATE telegram_outbox SET state='cancelled',error_code='initiative_budget' WHERE id=$1",[job.id]);continue;

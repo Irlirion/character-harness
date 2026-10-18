@@ -1,3 +1,7 @@
+import {deliverCodexProfileToolResult} from '../../packages/telegram/profile-tool-content.ts';
+import { RuntimeConsumer } from '../../packages/runtime/consumer.ts';
+import { runtimeEngineEnabled, runtimeRequestTimeout } from '../../packages/runtime/protocol.ts';
+import { runCodexPlanning } from '../../packages/runtime/codex-runner.ts';
 import { runImageLoop } from './images.ts';
 import { IMAGE_INSTRUCTIONS } from '../../packages/images/domain.ts';
 import { TELEGRAM_INSTRUCTIONS,parseTelegramDecision,telegramOutputSchema } from '../../packages/telegram/domain.ts';
@@ -12,6 +16,8 @@ import { makeTurnInput } from '../../packages/domain/conversation-context.ts';
 import { TurnFinishDecisionSchema, type TurnFinishDecision } from '../../packages/domain/turn-decision.ts';
 import { secret } from '../../packages/domain/secrets.ts';
 import { CODEX_ACTION_INSTRUCTIONS } from '../../packages/codex/instructions.ts';
+const enableRuntimeEngine=runtimeEngineEnabled(process.env.RUNTIME_ENGINE_ENABLED);
+const runtimeStop=new AbortController();
 const home=process.env.HARNESS_CODEX_HOME??'/data/codex';
 const cwd=process.env.HARNESS_CODEX_WORKSPACE??'/data/workspace';
 await configureCodex(home,cwd);
@@ -19,13 +25,13 @@ const rpc=new CodexRpc(process.env.CODEX_BIN??'/app/node_modules/.bin/codex',cwd
 const base=coreBaseUrl(process.env.CORE_URL??'http://core:3000');
 const headers={Authorization:`Bearer ${secret('ENGINE_TOKEN')}`,'Content-Type':'application/json'};
 async function api(path:string,body?:unknown){
- const r=await coreFetch(base+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(5000)});
+ const r=await coreFetch(base+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(runtimeRequestTimeout(path,5000))});
  if(!r.ok)throw new Error('core_request_failed');return r.json();
 }
 let stopped=false;let threadId:string|undefined;let turnId:string|undefined;
 let wakeSleep:(()=>void)|undefined;
 let stopImages:()=>void=()=>{};
-const stop=()=>{stopped=true;stopImages();wakeSleep?.();rpc.close();};process.once('SIGTERM',stop);process.once('SIGINT',stop);
+const stop=()=>{stopped=true;runtimeStop.abort();stopImages();wakeSleep?.();rpc.close();};process.once('SIGTERM',stop);process.once('SIGINT',stop);
 await rpc.initialize();
 const auth=await rpc.request('account/read',{refreshToken:false});
 if(auth.account?.type!=='chatgpt'){rpc.close();throw new Error('Run the isolated Codex ChatGPT login first');}
@@ -40,20 +46,24 @@ const sleep=(ms:number)=>new Promise<void>(resolve=>{
  const timer=setTimeout(done,ms);
  wakeSleep=done;
 });
+const runtime=enableRuntimeEngine?new RuntimeConsumer(api,{engine:'codex',model:selected.model??selected.id}):undefined;
 while(!stopped){
   const client=new Client({name:'codex-harness-bridge',version:'0.1.0'});
   let pendingEventId:string|undefined;
   let pendingEpoch:number|undefined;
   let finishDecision:TurnFinishDecision|undefined;
   try{
-   const input=await api('/engine/input');if(!input.event){await sleep(1000);continue;}
+   const input=await api('/engine/input');if(!input.event){
+    if(runtime)await runtime.tick((context,persona,signal,onUsage)=>runCodexPlanning(rpc,cwd,selected.model??selected.id,context,persona,signal,onUsage),runtimeStop.signal);
+    await sleep(1000);continue;
+   }
    pendingEventId=input.event.id;
    pendingEpoch=input.character.epoch;
   const isTelegram=input.event.channel==='telegram';
   const turnHeaders={...headers,'X-Harness-Event':input.event.id,'X-Harness-Epoch':String(input.character.epoch)};
   await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{fetch:coreFetch,requestInit:{headers:turnHeaders}}));
   const catalog=(await client.listTools()).tools;
-  const allowed=new Set(['agent_get_status','agent_observe','memory_search','memory_propose','memory_stage_delta','memory_social_list','agent_walk','agent_turn','agent_action_status','telegram_read_history','image_generate','image_generation_status','turn_finish']);
+  const allowed=new Set(['agent_get_status','agent_observe','memory_search','memory_propose','memory_stage_delta','memory_social_list','agent_walk','agent_turn','agent_action_status','telegram_read_history','telegram_group_participants','telegram_member_profile','telegram_send_group','telegram_group_delivery','image_generate','image_generation_status','turn_finish']);
   if(catalog.some(t=>!allowed.has(t.name)))throw new Error('unexpected_catalog');
   rpc.onRequest=async(method,p)=>{
    if(method!=='item/tool/call' || p.threadId!==threadId || !allowed.has(p.tool))throw new Error('tool_denied');
@@ -67,7 +77,8 @@ while(!stopped){
    if(p.tool==='memory_propose'){args.epoch=input.character.epoch;args.invocation_id=`${input.event.id}:${p.callId}`;}
    if(p.tool==='memory_stage_delta')args.invocation_id=`${input.event.id}:${input.character.epoch}:${p.callId}`;
    if(p.tool==='agent_walk'||p.tool==='agent_turn'){args.invocation_id=`${input.event.id}:${p.callId}`;args.expected_epoch=input.character.epoch;}
-   const result=await client.callTool({name:p.tool,arguments:args},undefined,{timeout:10000});
+   const result=await client.callTool({name:p.tool,arguments:args},undefined,{timeout:p.tool==='telegram_send_group'?45000:p.tool==='telegram_group_participants'?25000:p.tool==='telegram_member_profile'?30000:10000});
+   if(p.tool==='telegram_member_profile'){if(!turnId||p.turnId!==turnId)throw new Error('profile_turn_changed');return deliverCodexProfileToolResult(rpc,{threadId:p.threadId,turnId:p.turnId},result);}
    return {success:!result.isError,contentItems:[{type:'inputText',text:JSON.stringify(result)}]};
   };
   const started=await rpc.request('thread/start',{ephemeral:true,environments:[],runtimeWorkspaceRoots:[],cwd,sandbox:'read-only',approvalPolicy:'never',

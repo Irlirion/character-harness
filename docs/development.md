@@ -66,3 +66,31 @@ docker compose exec -T core node --experimental-strip-types scripts/codex-e2e.ts
 Социальная память первой версии описана в [плане](social-continuity-plan.md) и [ADR 0008](decisions/0008-social-memory.md). Оба engine получают audience-scoped social context и bounded world observations, используют scoped MCP memory tools и engine-local `turn_finish` для естественного ответа или explicit silence. Тишина завершает событие атомарно без reply/speech job и отражается в bounded conversation history. `/owner/inspect-context` показывает текущую реконструкцию без claim/inference. Minecraft CHAT пересылает все видимые signed user messages; opt-in GAME parser остаётся привязан к pinned server/public demo, а voice STT сохраняет wake-name фильтр. В обоих adapters доступны ограниченные observation/action tools; core fences actions по audience, epoch, observation session и lease. После миграции social-memory/staging перезапусти engine adapters, чтобы старые in-flight claims были обработаны заново после истечения lease.
 
 Нативный Qwen TTS и audio worker внедрены; аудиопуть до SVC подтверждён на слух, текущий запуск описан в [audio worker](audio-worker.md). Это не подтверждает полный игровой LLM-цикл: live inference, новый выбор silence и новые Minecraft ingress пути ожидают отдельной проверки в тестовом клиенте.
+
+
+## Переход на Runtime 2.0
+
+Первый слой постоянного состояния описан в [runtime-2-foundation](runtime-2-foundation.md).
+Он добавляет миграцию 012 и выключенный по умолчанию `RUNTIME_STORAGE_ENABLED` для
+owner API activities. Это не включает автономные модельные ходы и не меняет
+существующий протокол Pi/Codex. Интеграционные проверки входят в общий test suite.
+
+
+Activity-протокол и подключение Pi/Codex описаны в
+[runtime-2-engine-protocol](runtime-2-engine-protocol.md). Флаг `RUNTIME_ENGINE_ENABLED`
+выключен по умолчанию. Production core не содержит разрешающей runtime policy:
+включение обоих флагов само по себе не запускает автономную модель. Для проверки
+адаптеров используются fake модели и отдельная тестовая БД, без расхода подписки/API.
+
+
+Третий срез: [policy/resources](runtime-2-policy-resources.md), миграция 013.
+Core использует default-deny gate с версионированным профилем, проверкой точного
+контекста, одноразовым разрешением на старт и резервом ресурсов. Ни профиль,
+ни семантический reviewer автоматически не устанавливаются. Состояние доступно
+owner в `/owner/runtime-policy`; у модели нет метода изменить policy или лимиты.
+
+Подключение reviewer bridge и очередь повторной оценки описаны в [четвёртом срезе](runtime-2-review-workflow.md).
+
+Адаптер Codex и требования к его изоляции: [пятый срез](runtime-2-codex-reviewer.md).
+
+Управление activities из личного Telegram: [команды и границы](runtime-2-telegram.md).

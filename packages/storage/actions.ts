@@ -17,9 +17,10 @@ export async function enqueueClientAction(p: Principal, invocationId: string, ki
   const db = await pool.connect();
   try {
     await db.query('BEGIN');
-    const c = (await db.query('SELECT paused,epoch,lease_until FROM characters WHERE id=$1 FOR UPDATE', [p.characterId])).rows[0];
+    const c = (await db.query('SELECT * FROM characters WHERE id=$1 FOR UPDATE', [p.characterId])).rows[0];
     if (!c) throw new DomainError('character_not_found');
     assertActive(c, epoch);
+    if (c.active_runtime_turn_id) throw new DomainError('runtime_tools_disabled');
     if (!c.lease_until || new Date(c.lease_until).getTime() <= Date.now()) throw new DomainError('lease_expired');
     const observation=(await db.query(`SELECT session_id FROM world_observations WHERE character_id=$1 AND audience_id=$2
       AND connected AND server='mc.agicraft.ru:25565' AND received_at>now()-interval '2500 milliseconds' FOR SHARE`,[p.characterId,p.audienceId])).rows[0];
