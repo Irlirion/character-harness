@@ -4,6 +4,7 @@ const send=value=>process.stdout.write(JSON.stringify(value)+'\n');
 lines.on('line',line=>{
   const m=JSON.parse(line);
   if(m.method==='initialize')send({id:m.id,result:{protocolVersion:'test'}});
+  else if(m.method==='large-image'){send({method:'item/completed',params:{item:{type:'imageGeneration',result:'A'.repeat(2_100_000)}}});send({id:m.id,result:{ok:true}});}
   else if(m.method==='roundtrip'){
     send({id:41,method:'item/tool/call',params:{tool:'memory_search'}});
     lines.once('line',response=>{
