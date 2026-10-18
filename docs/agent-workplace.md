@@ -129,8 +129,12 @@ The read returns only available bio, display label, group status and one visible
 Privacy/API failures are explicit; an absent field does not prove the user has none.
 Avatar downloading stays inside the worker: fixed Telegram origin, no redirects,
 20-second operation deadline, 256 KiB limit and PNG/JPEG validation. Token-bearing file
-URLs/IDs are never returned. MCP returns native image content, carried as actual image
-input to Codex/Pi. No face identification, sensitive-attribute inference or following
+URLs/IDs are never returned. MCP returns native image content. Pi receives a native tool image. The pinned Codex
+app-server did not reliably expose dynamic-tool images to inference in live checks;
+Codex therefore attaches the requested avatar AND its profile metadata to the same
+active turn through turn/steer with original image detail. No new turn or permissions
+are created. If attachment fails the tool marks photo_visible_to_model=false so the
+agent reports the text and does not invent an image description. No face identification, sensitive-attribute inference or following
 instructions embedded in profiles/images. No background/profile cache or new table;
 ordinary provider/conversation retention still applies. Routine member-list questions
 must not fetch individual profiles unless asked.

@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {fetchMemberProfile} from '../packages/telegram/member-profile.ts';import {BotApi,BotApiError} from '../packages/telegram/api.ts';import {codexProfileToolResult,profileToolContent} from '../packages/telegram/profile-tool-content.ts';
+import test from 'node:test';import assert from 'node:assert/strict';import {fetchMemberProfile} from '../packages/telegram/member-profile.ts';import {BotApi,BotApiError} from '../packages/telegram/api.ts';import {codexProfileToolResult,profileToolContent,deliverCodexProfileToolResult} from '../packages/telegram/profile-tool-content.ts';
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII=';
 const member=(id=2,name='Миша',username='misha')=>({status:'member',user:{id,first_name:name,username}});
 test('profile resolves only known group member and returns bounded available bio/avatar without IDs',async()=>{
@@ -21,4 +21,12 @@ test('photo download uses only fixed Telegram origin and bounds image data',asyn
 });
 test('profile avatar is native model image content, never base64 text or token-bearing URL',()=>{
  const result={content:[{type:'text',text:'{"bio":"original"}'},{type:'image',data:png,mimeType:'image/png'}]};const c=codexProfileToolResult(result);assert.equal(c.contentItems[0].type,'inputText');assert.equal(c.contentItems[1].type,'inputImage');assert.ok(!JSON.stringify(c.contentItems[0]).includes(png));assert.equal(profileToolContent(result)[1].type,'image');assert.throws(()=>profileToolContent({content:[{type:'image',data:png,mimeType:'image/jpeg'}]}));
+});
+
+
+test('Codex avatar and bio are attached to the exact active turn with original detail',async()=>{
+ const result={content:[{type:'text',text:'{"bio":"bridges"}'},{type:'image',data:png,mimeType:'image/png'}]};let request:any;
+ const output=await deliverCodexProfileToolResult({request:async(method,params)=>{request={method,params};return {turnId:'active-turn'};}},{threadId:'thread',turnId:'active-turn'},result);
+ assert.equal(request.method,'turn/steer');assert.equal(request.params.expectedTurnId,'active-turn');assert.equal(request.params.threadId,'thread');assert.equal(request.params.input[1].text,'{"bio":"bridges"}');assert.equal(request.params.input[2].detail,'original');assert.ok(request.params.input[2].url.startsWith('data:image/png;base64,'));assert.ok(output.contentItems.every(c=>c.type==='inputText'));
+ const failed=await deliverCodexProfileToolResult({request:async()=>{throw new Error('stale');}},{threadId:'thread',turnId:'active-turn'},result);assert.equal(JSON.parse(failed.contentItems.at(-1)!.text!).photo_visible_to_model,false);assert.equal(failed.contentItems[0].text,'{"bio":"bridges"}');
 });

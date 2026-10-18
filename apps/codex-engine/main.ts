@@ -1,4 +1,4 @@
-import {codexProfileToolResult} from '../../packages/telegram/profile-tool-content.ts';
+import {deliverCodexProfileToolResult} from '../../packages/telegram/profile-tool-content.ts';
 import { RuntimeConsumer } from '../../packages/runtime/consumer.ts';
 import { runtimeEngineEnabled, runtimeRequestTimeout } from '../../packages/runtime/protocol.ts';
 import { runCodexPlanning } from '../../packages/runtime/codex-runner.ts';
@@ -78,7 +78,7 @@ while(!stopped){
    if(p.tool==='memory_stage_delta')args.invocation_id=`${input.event.id}:${input.character.epoch}:${p.callId}`;
    if(p.tool==='agent_walk'||p.tool==='agent_turn'){args.invocation_id=`${input.event.id}:${p.callId}`;args.expected_epoch=input.character.epoch;}
    const result=await client.callTool({name:p.tool,arguments:args},undefined,{timeout:p.tool==='telegram_send_group'?45000:p.tool==='telegram_group_participants'?25000:p.tool==='telegram_member_profile'?30000:10000});
-   if(p.tool==='telegram_member_profile')return codexProfileToolResult(result);
+   if(p.tool==='telegram_member_profile'){if(!turnId||p.turnId!==turnId)throw new Error('profile_turn_changed');return deliverCodexProfileToolResult(rpc,{threadId:p.threadId,turnId:p.turnId},result);}
    return {success:!result.isError,contentItems:[{type:'inputText',text:JSON.stringify(result)}]};
   };
   const started=await rpc.request('thread/start',{ephemeral:true,environments:[],runtimeWorkspaceRoots:[],cwd,sandbox:'read-only',approvalPolicy:'never',
