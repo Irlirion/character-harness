@@ -1,3 +1,4 @@
+import {decisionPayload} from '../runtime/policy.ts';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { Principal } from '../domain/policy.ts';
@@ -40,7 +41,7 @@ export async function writePolicyAudit(db:Pick<pg.Pool,'query'>|pg.PoolClient,p:
 export async function assertDecisionGrant(db:pg.PoolClient,p:Principal,turn:any,body:unknown,approved:ApprovedDecision,replay:boolean) {
  await assertCurrentProfile(db,p,approved.profile_version,approved.profile_hash);
  const g=(await db.query(`SELECT * FROM runtime_model_grants WHERE id=$1 AND turn_id=$2 AND character_id=$3 AND audience_id=$4 FOR UPDATE`,[approved.grant_id,turn.id,p.characterId,p.audienceId])).rows[0];
- if(!g||g.policy_version!==approved.profile_version||g.profile_hash!==approved.profile_hash||fingerprint(body)!==approved.output_hash||approved.review.verdict!=='allow'||approved.review.payload_hash!==fingerprint({checkpoint:(body as any).checkpoint,decision:(body as any).decision}))throw new DomainError('runtime_approval_invalid');
+ if(!g||g.policy_version!==approved.profile_version||g.profile_hash!==approved.profile_hash||fingerprint(body)!==approved.output_hash||approved.review.verdict!=='allow'||approved.review.payload_hash!==fingerprint(decisionPayload(body)))throw new DomainError('runtime_approval_invalid');
  if(replay){if(g.state!=='finished'||g.output_hash!==approved.output_hash)throw new DomainError('runtime_approval_invalid');return;}
  const now=(await db.query('SELECT clock_timestamp() AS at')).rows[0].at.getTime();
  if(g.state!=='started'||new Date(g.expires_at).getTime()<=now)throw new DomainError('runtime_approval_expired');

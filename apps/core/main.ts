@@ -48,7 +48,7 @@ const app = buildApp({
   telegram,
   runtime, runtimeEngine:runtime,
   // A reviewer bridge requires explicit operator configuration; no profile is installed automatically.
-  runtimePolicy:runtime&&runtimeAuth?new RuntimeAudienceGate(new RuntimePolicyGate(runtime,runtimeAuth,reviewer,reviewerConfig?reviewerConfig.timeout_ms+100:2000),pool):undefined,
+  runtimePolicy:runtime&&runtimeAuth?new RuntimeAudienceGate(new RuntimePolicyGate(runtime,runtimeAuth,reviewer,reviewerConfig?reviewerConfig.timeout_ms+100:2000),pool,p=>runtime.schedule(p)):undefined,
   images:telegram && process.env.TELEGRAM_IMAGES_ENABLED==='true'?new ImageStore(pool,character.id):undefined,
   allowSystemChatPublicDemo, allowClientWorld,
   memoryInstructions,

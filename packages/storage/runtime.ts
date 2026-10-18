@@ -1,3 +1,4 @@
+import {deskContext,deskFingerprint,scheduleAutonomy,commitDesk} from './workplace.ts';
 import { sourceFingerprint, type ApprovedClaim, type ApprovedDecision } from '../runtime/policy.ts';
 import { reserveModelGrant, assertDecisionGrant } from './runtime-authorization.ts';
 import { WorkLeaseSchema } from '../runtime/protocol.ts';
@@ -70,6 +71,8 @@ export class RuntimeStore {
     });
   }
 
+  async schedule(p:Principal){return this.transaction(p,async(db,state)=>{if(!state.paused)await scheduleAutonomy(db,p,new Date(state.db_now));});}
+  async desk(p:Principal){return deskContext(this.client??this.pool,p);}
   async list(p: Principal, limit = 20, offset = 0) {
     ({limit,offset} = ActivityPageSchema.parse({limit,offset}));
     return (await (this.client??this.pool).query(`SELECT id,objective,origin,requested_by,status,version,max_turns,turns_used,
@@ -149,13 +152,13 @@ export class RuntimeStore {
     const c=(await this.pool.query('SELECT * FROM characters WHERE id=$1',[p.characterId])).rows[0];
     if(!c||c.paused||(c.lease_until&&new Date(c.lease_until).getTime()>Date.now()))return null;
     const a=(await this.pool.query(`SELECT a.*,w.kind AS wake_reason FROM runtime_activities a JOIN runtime_wakeups w ON w.activity_id=a.id
-      WHERE a.character_id=$1 AND a.audience_id=$2 AND a.status IN ('ready','waiting_time') AND a.turns_used<a.max_turns
+      WHERE a.character_id=$1 AND a.audience_id=$2 AND a.status IN ('ready','waiting_time') AND a.turns_used<a.max_turns AND (a.origin='owner' OR EXISTS(SELECT 1 FROM runtime_autonomy ra JOIN telegram_bindings rb ON rb.id=ra.binding_id WHERE rb.character_id=a.character_id AND rb.audience_id=a.audience_id AND rb.enabled AND ra.enabled))
       AND w.state='pending' AND w.available_at<=clock_timestamp()
       AND NOT EXISTS(SELECT 1 FROM runtime_policy_holds h WHERE h.activity_id=a.id AND h.activity_version=a.version AND h.policy_version=$3)
       ORDER BY w.available_at,w.id LIMIT 1`,[p.characterId,p.audienceId,policyVersion])).rows[0];
     if(!a)return null;
     const checkpoint=a.checkpoint_id?(await this.pool.query('SELECT state FROM runtime_checkpoints WHERE id=$1',[a.checkpoint_id])).rows[0].state:null;
-    return {activity:a,checkpoint,persona:c.persona,wake_reason:a.wake_reason};
+    return {activity:a,checkpoint,persona:c.persona,wake_reason:a.wake_reason,context:await this.desk(p)};
   }
 
   async claim(p: Principal, input: unknown, approved?:ApprovedClaim): Promise<{work: {activity: any; turn: any; checkpoint: string | null; wake_reason: string} | null; reason?: string}> {
@@ -173,12 +176,13 @@ export class RuntimeStore {
       if (daily >= 100) return { work:null, reason:'character_turn_budget' };
       const due = (await db.query(`SELECT a.*,w.id AS wakeup_id FROM runtime_activities a JOIN runtime_wakeups w ON w.activity_id=a.id
         WHERE a.character_id=$1 AND a.audience_id=$2 AND a.status IN ('ready','waiting_time')
-        AND a.turns_used<a.max_turns AND w.state='pending' AND w.available_at<=clock_timestamp()
+        AND a.turns_used<a.max_turns AND (a.origin='owner' OR EXISTS(SELECT 1 FROM runtime_autonomy ra JOIN telegram_bindings rb ON rb.id=ra.binding_id WHERE rb.character_id=a.character_id AND rb.audience_id=a.audience_id AND rb.enabled AND ra.enabled)) AND w.state='pending' AND w.available_at<=clock_timestamp()
         AND NOT EXISTS(SELECT 1 FROM runtime_policy_holds h WHERE h.activity_id=a.id AND h.activity_version=a.version AND ($3::text IS NULL OR h.policy_version=$3))
         ORDER BY w.available_at,w.id LIMIT 1 FOR UPDATE OF a,w`,[p.characterId,p.audienceId,approved?.profile.version??null])).rows[0];
       if (!due) return { work:null, reason:'idle_or_budget_blocked' };
       if(approved){
         const checkpoint=due.checkpoint_id?(await db.query('SELECT state FROM runtime_checkpoints WHERE id=$1',[due.checkpoint_id])).rows[0].state:null;
+        if(approved.input.desk&&deskFingerprint(await deskContext(db,p))!==deskFingerprint(approved.input))return {work:null,reason:'runtime_context_changed'};
         if(due.id!==approved.activity_id||sourceFingerprint(due,checkpoint,state.persona)!==approved.source_hash)return {work:null,reason:'runtime_context_changed'};
       }
       const epoch = (await db.query(`UPDATE characters SET epoch=epoch+1,lease_until=clock_timestamp()+interval '90 seconds',active_event_id=NULL
@@ -237,6 +241,7 @@ export class RuntimeStore {
       if (a.version !== b.expected_version) throw new DomainError('activity_version_conflict');
       if (b.decision.action === 'wait_until' && new Date(b.decision.at).getTime() < new Date(state.db_now).getTime()+60_000) throw new DomainError('wakeup_too_soon');
       if(approved)await assertDecisionGrant(db,p,turn,b,approved,false);
+      await commitDesk(db,p,b,a,!!approved,state);
       const checkpointId = randomUUID();
       await db.query(`INSERT INTO runtime_checkpoints(id,character_id,audience_id,activity_id,turn_id,state) VALUES($1,$2,$3,$4,$5,$6)`,[checkpointId,p.characterId,p.audienceId,a.id,turn.id,b.checkpoint]);
       const status = {continue:'ready',wait_until:'waiting_time',request_input:'needs_input',complete:'completed'}[b.decision.action];

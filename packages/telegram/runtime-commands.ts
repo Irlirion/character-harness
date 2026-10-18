@@ -1,3 +1,4 @@
+import {initiativeDeliveryValid,configureAutonomy,deskContext} from '../storage/workplace.ts';
 import type pg from 'pg';
 import {z} from 'zod';
 import {DomainError} from '../domain/policy.ts';
@@ -6,9 +7,9 @@ import {assertCurrentProfile} from '../storage/runtime-authorization.ts';
 import type {RuntimeStore} from '../storage/runtime.ts';
 import type {TelegramMessage} from './domain.ts';
 
-const help='Задачи: /task <что спланировать>\n/tasks — список\n/status [ID] — состояние и вопрос\n/result [ID] — результат\n/answer [ID] <ответ> — продолжить\n/cancel [ID] — отменить. Без ID выбирается последняя подходящая задача. Это планирование, без действий в игре.';
+const help='Задачи: /task <что спланировать>\n/tasks — список\n/status [ID] — состояние и вопрос\n/result [ID] — результат\n/answer [ID] <ответ> — продолжить\n/cancel [ID] — отменить. Без ID выбирается последняя подходящая задача. Это планирование, без действий в игре.\n/autonomy on | off — самостоятельная работа в группе\n/desk — заметки и план группы';
 export function runtimeCommand(text:string,username:string){
- const match=/^\/(task|tasks|status|result|answer|cancel|help_tasks)(?:@([a-zA-Z0-9_]+))?(?:\s+([\s\S]*))?$/.exec(text.trim());
+ const match=/^\/(task|tasks|status|result|answer|cancel|help_tasks|autonomy|desk)(?:@([a-zA-Z0-9_]+))?(?:\s+([\s\S]*))?$/.exec(text.trim());
  if(!match||match[2]&&match[2].toLowerCase()!==username.toLowerCase())return null;
  return {name:match[1],argument:(match[3]??'').trim()};
 }
@@ -21,6 +22,18 @@ export async function handleRuntimeCommand(db:pg.PoolClient,store:RuntimeStore,b
  if(!b.runtime_control||b.kind!=='private'||m.kind!=='private'||m.authorId!=='telegram:'+b.chat_id)return {text:''};
  const p={characterId:b.character_id,audienceId:b.audience_id},runtime=store.withTransaction(db);
  try{
+  if(cmd.name==='autonomy'||cmd.name==='desk'){
+   const group=(await db.query("SELECT b.*,a.enabled AS autonomous,a.next_wake_at FROM telegram_bindings b LEFT JOIN runtime_autonomy a ON a.binding_id=b.id WHERE b.character_id=$1 AND b.kind='group' AND b.enabled",[b.character_id])).rows[0];
+   if(!group)return {text:'Нет подключённой группы.'};
+   if(cmd.name==='autonomy'){
+    if(cmd.argument&&!['on','off'].includes(cmd.argument))return {text:'/autonomy on | off — управление; /autonomy — состояние; /desk — рабочий стол группы'};
+    if(cmd.argument){await configureAutonomy(db,b.character_id,group.id,cmd.argument==='on');group.autonomous=cmd.argument==='on';}
+    return {text:'Автономность группы: '+(group.autonomous?'включена':'выключена')+'\nПробуждения раз в 2 часа; 09–21 по Германии; до 2 первых сообщений за сутки. Молчание — допустимое решение. /desk'};
+   }
+   const ctx=await deskContext(db,{characterId:b.character_id,audienceId:group.audience_id});
+   const text='Рабочий стол группы · версия '+ctx.desk.revision+'\nПлан: '+(ctx.desk.plan||'пока пуст')+'\nЗаметки: '+(ctx.desk.notes||'пока пуст');
+   return {text:secretDetected(text)?'Выдача заметок заблокирована.':text.slice(0,2000)};
+  }
   if(cmd.name==='help_tasks')return {text:help};
   if(cmd.name==='task'){
    if(!cmd.argument)return {text:help};
@@ -61,6 +74,7 @@ function label(s:string){return ({ready:'в очереди',running:'плани�
 
 export async function runtimeDeliveryValid(db:pg.PoolClient,job:any){
  if(!job.runtime_activity_id)return true;
+ if(job.autonomy_revision&&!await initiativeDeliveryValid(db,job))return false;
  if(secretDetected(job.text)||fingerprint(job.text)!==job.runtime_text_hash)return false;
  const r=(await db.query(`SELECT 1 FROM runtime_activities a JOIN runtime_checkpoints c ON c.id=a.checkpoint_id
   JOIN runtime_model_grants g ON g.turn_id=c.turn_id AND g.activity_id=a.id
@@ -68,9 +82,9 @@ export async function runtimeDeliveryValid(db:pg.PoolClient,job:any){
   JOIN runtime_policy_profiles pp ON pp.character_id=pc.character_id AND pp.version=pc.version
   JOIN telegram_bindings b ON b.id=$1 AND b.character_id=a.character_id AND b.audience_id=a.audience_id
   WHERE a.id=$2 AND a.version=$3 AND c.turn_id=$4 AND g.policy_version=$5 AND g.profile_hash=$6 AND pp.profile_hash=$6
-   AND g.state='finished' AND b.kind='private' AND b.runtime_control AND b.enabled AND b.revision=$7
+   AND g.state='finished' AND ((b.kind='private' AND b.runtime_control AND $8::integer IS NULL) OR (b.kind='group' AND $8::integer IS NOT NULL AND a.origin='self')) AND b.enabled AND b.revision=$7
    AND (pp.bundle->>'enabled')::boolean AND (pp.bundle->>'provider_eligible')::boolean
    AND (pp.bundle->>'reviewed_at')::timestamptz<=clock_timestamp() AND (pp.bundle->>'expires_at')::timestamptz>clock_timestamp()`,
-  [job.binding_id,job.runtime_activity_id,job.runtime_activity_version,job.runtime_turn_id,job.runtime_policy_version,job.runtime_profile_hash,job.revision])).rowCount;
+  [job.binding_id,job.runtime_activity_id,job.runtime_activity_version,job.runtime_turn_id,job.runtime_policy_version,job.runtime_profile_hash,job.revision,job.autonomy_revision??null])).rowCount;
  return !!r;
 }

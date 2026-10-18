@@ -13,10 +13,13 @@ export const DecisionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('request_input'), question: z.string().trim().min(1).max(2000) }).strict(),
   z.object({ action: z.literal('complete'), summary: z.string().trim().min(1).max(4000) }).strict(),
 ]);
+export const DeskWriteSchema=z.object({expected_revision:z.number().int().positive(),notes:z.string().max(4000),plan:z.string().max(2000)}).strict();
+export const InitiativeSchema=z.object({text:z.string().trim().min(1).max(1000),reason:z.string().trim().min(1).max(1000)}).strict();
 export const WorkDecisionSchema = z.object({
   invocation_id: z.string().min(1).max(200), turn_id: z.uuid(), lease_token: z.uuid(),
   epoch: z.number().int().positive(), expected_version: z.number().int().positive(),
   checkpoint: z.string().max(16_000), decision: DecisionSchema,
+  desk:DeskWriteSchema.optional(),initiative:InitiativeSchema.optional(),
 }).strict();
 export const CancelActivitySchema = z.object({ expected_version: z.number().int().positive() }).strict();
 export type CreateActivity = z.infer<typeof CreateActivitySchema>;

@@ -1,3 +1,4 @@
+import {configureAutonomy} from './workplace.ts';
 import {handleRuntimeCommand,runtimeCommand,runtimeDeliveryValid} from '../telegram/runtime-commands.ts';
 import type {RuntimeStore} from './runtime.ts';
 import {fingerprint} from '../runtime/policy.ts';
@@ -67,6 +68,7 @@ export class TelegramStore {
       return binding;
     });
   }
+  async autonomy(bindingId:string,enabled:boolean){return this.tx(db=>configureAutonomy(db,this.characterId,bindingId,enabled));}
   async runtimeControl(bindingId:string,enabled:boolean){
     return this.tx(async db=>{
       const b=(await db.query("SELECT * FROM telegram_bindings WHERE id=$1 AND character_id=$2 AND kind='private' FOR UPDATE",[bindingId,this.characterId])).rows[0];

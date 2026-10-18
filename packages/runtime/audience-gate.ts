@@ -4,13 +4,16 @@ import {DomainError,type Principal} from '../domain/policy.ts';
 import type {RuntimeExecutionGate} from './gate.ts';
 import {ClaimWorkSchema} from './contracts.ts';
 
-/** Only server-bound private Telegram scopes are added; engine input never chooses an audience. */
+/** Only server-bound private control and opted-in group scopes are added; engine input never chooses an audience. */
 export class RuntimeAudienceGate implements RuntimeExecutionGate {
- constructor(privateGate:RuntimeExecutionGate,pool:pg.Pool){this.gate=privateGate;this.pool=pool;}
+ constructor(privateGate:RuntimeExecutionGate,pool:pg.Pool,schedule?: (p:Principal)=>Promise<unknown>){this.gate=privateGate;this.pool=pool;this.schedule=schedule;}
+ private schedule?: (p:Principal)=>Promise<unknown>;
  private gate:RuntimeExecutionGate;private pool:pg.Pool;private cursor=0;
- private async audiences(p:Principal,includeDisabled=false){const rows=(await this.pool.query("SELECT audience_id FROM telegram_bindings WHERE character_id=$1 AND kind='private' AND ((enabled AND runtime_control) OR $2)",[p.characterId,includeDisabled])).rows;return [...new Set([p.audienceId,...rows.map(r=>r.audience_id)])];}
+ private async audiences(p:Principal,includeDisabled=false){const rows=(await this.pool.query("SELECT audience_id FROM telegram_bindings WHERE character_id=$1 AND ((kind='private' AND ((enabled AND runtime_control) OR $2)) OR (kind='group' AND (EXISTS(SELECT 1 FROM runtime_autonomy a WHERE a.binding_id=telegram_bindings.id AND a.enabled AND telegram_bindings.enabled) OR $2)))",[p.characterId,includeDisabled])).rows;return [...new Set([p.audienceId,...rows.map(r=>r.audience_id)])];}
  async claim(p:Principal,input:unknown){
-  const b=ClaimWorkSchema.parse(input),scopes=await this.audiences(p);
+  const b=ClaimWorkSchema.parse(input);
+  if(this.schedule&&await this.gate.executionEnabled?.(p))await this.schedule(p);
+  const scopes=await this.audiences(p);
   const old=(await this.pool.query('SELECT audience_id FROM runtime_turns WHERE character_id=$1 AND request_id=$2 AND audience_id=ANY($3::text[]) ORDER BY created_at LIMIT 1',[p.characterId,b.request_id,scopes])).rows[0];
   if(old)return this.gate.claim({...p,audienceId:old.audience_id},b);
   let last:{work:any;reason?:string}={work:null,reason:'idle_or_budget_blocked'};

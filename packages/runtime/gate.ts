@@ -5,7 +5,7 @@ import type { RuntimeStore } from '../storage/runtime.ts';
 import { RuntimeAuthorizationStore, profileUsable } from '../storage/runtime-authorization.ts';
 import { ClaimWorkSchema, WorkDecisionSchema } from './contracts.ts';
 import { RuntimeWorkSchema, WorkLeaseSchema, StartWorkSchema, UsageSchema, type RuntimeWork, type PlanningInput } from './protocol.ts';
-import { fingerprint, sourceFingerprint, requestPayload, reviewContent, type ContentReviewer } from './policy.ts';
+import { fingerprint, decisionPayload, sourceFingerprint, requestPayload, reviewContent, type ContentReviewer } from './policy.ts';
 
 export interface RuntimeExecutionGate {
  claim(p:Principal,input:unknown):Promise<{work:RuntimeWork|null;reason?:string}>;
@@ -40,7 +40,7 @@ export class RuntimePolicyGate implements RuntimeExecutionGate {
   if(!candidate)return {work:null,reason:'idle_or_budget_blocked'};
   const a=candidate.activity;
   const modelInput:PlanningInput={activity:{id:a.id,objective:a.objective,origin:a.origin,remaining_turns:a.max_turns-a.turns_used-1,input_reply:a.input_reply??null},
-   checkpoint:candidate.checkpoint,audience_id:p.audienceId,wake_reason:candidate.wake_reason,suggested_wakeup_at:new Date(Date.now()+180000).toISOString()};
+   checkpoint:candidate.checkpoint,audience_id:p.audienceId,wake_reason:candidate.wake_reason,suggested_wakeup_at:new Date(Date.now()+180000).toISOString(),...candidate.context};
   const payload=requestPayload(modelInput,candidate.persona,profile);
   const review=await reviewContent(profile,'input',payload,this.reviewer,this.timeoutMs);
   if(review.verdict!=='allow'){
@@ -66,7 +66,7 @@ export class RuntimePolicyGate implements RuntimeExecutionGate {
  async decide(p:Principal,input:unknown) {
   const b=WorkDecisionSchema.parse(input);const g=await this.auth.decisionGrant(p,b);const current=await this.auth.profile(p);
   if(!g||!current||current.profile.version!==g.policy_version||current.profile_hash!==g.profile_hash||!profileUsable(current.profile,Date.now()))throw new DomainError('runtime_policy_stale');
-  const payload={checkpoint:b.checkpoint,decision:b.decision};
+  const payload=decisionPayload(b);
   if(g.state==='finished'&&g.output_hash===fingerprint(b))return this.runtime.decide(p,b,{grant_id:g.id,profile_version:g.policy_version,profile_hash:g.profile_hash,output_hash:g.output_hash,
    review:{verdict:'allow',rule_id:'receipt_replay',policy_version:g.policy_version,payload_hash:fingerprint(payload)}});
   if(g.state!=='started'||!(await this.runtime.lease(p,{turn_id:b.turn_id,epoch:b.epoch,lease_token:b.lease_token})).valid)throw new DomainError('runtime_approval_invalid');

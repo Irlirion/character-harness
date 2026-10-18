@@ -7,6 +7,7 @@ export function telegramRoutes(app:FastifyInstance,store:TelegramStore) {
   const chat=z.string().regex(/^-?\d+$/).max(30);
   // Keep the global role budget first; the plugin skips its second handler via the request marker.
   app.get('/owner/telegram',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},()=>store.overview());
+  app.post('/owner/telegram/autonomy',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},async req=>{const b=z.object({binding_id:z.uuid(),enabled:z.boolean()}).strict().parse(req.body);return store.autonomy(b.binding_id,b.enabled);});
   app.post('/owner/telegram/runtime-control',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},async req=>{
     const b=z.object({binding_id:z.uuid(),enabled:z.boolean()}).strict().parse(req.body);
     return store.runtimeControl(b.binding_id,b.enabled);
