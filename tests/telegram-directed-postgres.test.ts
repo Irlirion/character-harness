@@ -46,7 +46,7 @@ test('natural-language private owner group sends are reviewed, scoped and durabl
    const second=await event('Поздравь его с наступающим хелуином');await tg.sendGroup(scope(),second.id,second.epoch,'Ильсур, с наступающим Хеллоуином!');
    const checked=reviews.at(-1);assert.ok(checked.current_owner_request.includes('Поздравь его'));
    assert.equal(checked.recent_confirmed_group_deliveries.length,1);assert.ok(checked.recent_confirmed_group_deliveries[0].owner_request.includes('Ильсуру'));assert.equal(checked.recent_confirmed_group_deliveries[0].sent_text,'Ильсур, привет!');
-   assert.equal(checked.target,'single_configured_group');const next=await tg.claim('99',owner);assert.equal(next!.chat_id,'-42');
+   assert.equal(checked.target,'selected_approved_group');const next=await tg.claim('99',owner);assert.equal(next!.chat_id,'-42');
   });
   await t.test('unconfirmed, old and reconfigured-group sends cannot become confirmed follow-up context',async()=>{
    for(const kind of ['unknown','old','reconfigured']){
