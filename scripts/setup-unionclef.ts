@@ -17,15 +17,17 @@ if(pack.components&&pack.components.find((c:any)=>c.uid==='net.minecraft')?.vers
 const s=await readJson(settings),tungstenPath=join(config,'tungsten.json'),t=await readJson(tungstenPath);
 const propsPath=join(config,'character-harness-bridge.properties');let props=await readFile(propsPath,'utf8');
 const cache=resolve(import.meta.dirname,'../work/unionclef-downloads');await mkdir(cache,{recursive:true});
-const jar=join(cache,'unionclef-1.21.11-0.95.63.jar');let bytes:Buffer;
+const jar=join(cache,'unionclef-1.21.11-0.95.63.jar');let bytes:Buffer;let downloaded=false;
 try{bytes=await readFile(jar);}catch(e){
  if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;
  const res=await fetch(release.url,{signal:AbortSignal.timeout(60000)});
  if(!res.ok||!res.body)throw new Error('UnionClef release download failed');
  const chunks:Uint8Array[]=[];let length=0;for await(const chunk of res.body){length+=chunk.length;if(length>10*1024*1024)throw new Error('Release too large');chunks.push(chunk);}
- bytes=Buffer.concat(chunks);await writeFile(jar,bytes);
+ bytes=Buffer.concat(chunks);downloaded=true;
 }
 if(createHash('sha256').update(bytes).digest('hex')!==release.sha256)throw new Error('UnionClef SHA256 mismatch');
+// Never persist a network payload until its exact pinned digest has been verified.
+if(downloaded){await writeFile(jar+'.verified-new',bytes);await rename(jar+'.verified-new',jar);}
 const {stdout}=await promisify(execFile)('/usr/bin/unzip',['-p',jar,'fabric.mod.json']);const metadata=JSON.parse(stdout);
 if(metadata.id!=='altoclef'||metadata.version!=='1.21.11-0.95.63')throw new Error('Unexpected UnionClef artifact');
 // Prepare every change before writing the instance; retain existing user automation settings.
