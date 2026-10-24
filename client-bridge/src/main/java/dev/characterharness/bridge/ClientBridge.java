@@ -83,6 +83,7 @@ public final class ClientBridge implements ClientModInitializer {
     private SttServiceClient sttService;
     private boolean systemServerWarningLogged;
     private ClientActionController actionController;
+    private UnionClefNavigation unionclef;
 
     @Override public void onInitializeClient() {
         try {
@@ -100,7 +101,8 @@ public final class ClientBridge implements ClientModInitializer {
             ClientReceiveMessageEvents.GAME.register((message, overlay) -> onSystemChat(message.getString(), overlay));
             LOG.info("Unverified system-chat adapter enabled for {}; it is limited to the public demo scope.", config.systemChatServer());
         }
-        actionController = new ClientActionController(this::completeClientAction,id -> java.util.Objects.equals(activeWorldSessionId,id));
+        if(config.unionclefEnabled())unionclef=new UnionClefNavigation(new UnionClefMcp(config.unionclefUrl(),config.unionclefToken()),UnionClefGuard::emergencyStop);
+        actionController = new ClientActionController(this::completeClientAction,id -> java.util.Objects.equals(activeWorldSessionId,id),unionclef);
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
         ClientLifecycleEvents.CLIENT_STOPPING.register(this::onClientStopping);
         io.scheduleWithFixedDelay(this::pollReplies, 1, 1, TimeUnit.SECONDS);
@@ -114,6 +116,7 @@ public final class ClientBridge implements ClientModInitializer {
         clearQueuedStt();
         io.shutdownNow();
         observationIo.shutdownNow();
+        if(unionclef!=null)unionclef.close();
         actionIo.shutdown();
         sttIo.shutdownNow();
         instance = null;
@@ -233,10 +236,14 @@ public final class ClientBridge implements ClientModInitializer {
                 json.getAsJsonObject("args").has("strafe")?json.getAsJsonObject("args").get("strafe").getAsDouble():0,
                 json.getAsJsonObject("args").has("yaw_degrees")?json.getAsJsonObject("args").get("yaw_degrees").getAsDouble():0,
                 json.getAsJsonObject("args").has("pitch_degrees")?json.getAsJsonObject("args").get("pitch_degrees").getAsDouble():0,
-                json.get("duration_ms").getAsInt(),OffsetDateTime.parse(json.get("expires_at").getAsString()).toInstant().toEpochMilli(),json.get("session_id").getAsString());
+                json.get("duration_ms").getAsInt(),OffsetDateTime.parse(json.get("expires_at").getAsString()).toInstant().toEpochMilli(),json.get("session_id").getAsString(),
+                json.getAsJsonObject("args").has("x")?json.getAsJsonObject("args").get("x").getAsInt():0,
+                json.getAsJsonObject("args").has("y")?json.getAsJsonObject("args").get("y").getAsInt():0,
+                json.getAsJsonObject("args").has("z")?json.getAsJsonObject("args").get("z").getAsInt():0);
     }
 
     private void onClientTick(MinecraftClient client) {
+        if(unionclef!=null)unionclef.enforceStop();
         syncWorldSession(client);
         if(config.observationEnabled()&&activeWorldSessionId!=null&&++observationTicks>=20){observationTicks=0;publishWorldObservation(client);}
         if (actionController != null) actionController.tick(client);
@@ -380,8 +387,9 @@ public final class ClientBridge implements ClientModInitializer {
         self.addProperty("yaw",MathHelper.wrapDegrees(client.player.getYaw()));self.addProperty("pitch",client.player.getPitch());
         Vec3d v=client.player.getVelocity();self.addProperty("vx",v.x);self.addProperty("vy",v.y);self.addProperty("vz",v.z);
         self.addProperty("on_ground",client.player.isOnGround());self.addProperty("health",client.player.getHealth());
+        if(unionclef!=null&&unionclef.available()&&UnionClefGuard.ready())self.addProperty("navigation_backend","unionclef_mcp");
         self.addProperty("dimension",client.world.getRegistryKey().getValue().toString());
-        ClientActionController.Action forward=new ClientActionController.Action("snapshot","snapshot","walk",1,0,0,0,300,System.currentTimeMillis()+1000,activeWorldSessionId);
+        ClientActionController.Action forward=new ClientActionController.Action("snapshot","snapshot","walk",1,0,0,0,300,System.currentTimeMillis()+1000,activeWorldSessionId,0,0,0);
         ClientActionController.StepCheck step=ClientActionController.checkStep(client,forward);
         self.addProperty("collision_ahead",step.collisionAhead());self.addProperty("support_ahead",step.supportAhead());
         step.addSummary(self,client.player.isOnGround());body.add("self",self);

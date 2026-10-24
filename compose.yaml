@@ -32,6 +32,7 @@ services:
       AUDIO_TOKEN_FILE: /run/secrets/audio_token
       BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
       RUNTIME_STORAGE_ENABLED: ${RUNTIME_STORAGE_ENABLED:-false}
+      MINECRAFT_BACKEND: ${MINECRAFT_BACKEND:-unionclef}
       BRIDGE_CLIENT_WORLD_ENABLED: ${BRIDGE_CLIENT_WORLD_ENABLED:-false}
       CHARACTER_ID: ${CHARACTER_ID:-lada}
       CHARACTER_FILE: ${CHARACTER_FILE:-characters/Lada/personalities.yml}

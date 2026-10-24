@@ -68,7 +68,7 @@ while (!stopped) {
     const turnHeaders={...headers,'X-Harness-Event':input.event.id,'X-Harness-Epoch':String(input.character.epoch)};
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { fetch: coreFetch, requestInit: { headers:turnHeaders } }));
     const catalog = await client.listTools();
-    const approved = new Set(['agent_get_status', 'agent_observe', 'memory_search', 'memory_propose', 'memory_stage_delta', 'memory_social_list', 'agent_walk', 'agent_turn', 'agent_action_status','telegram_read_history','telegram_group_participants','telegram_member_profile','telegram_groups','telegram_send_group','telegram_group_delivery']);
+    const approved = new Set(['agent_get_status', 'agent_observe', 'memory_search', 'memory_propose', 'memory_stage_delta', 'memory_social_list', 'agent_goto','agent_walk', 'agent_turn', 'agent_action_status','telegram_read_history','telegram_group_participants','telegram_member_profile','telegram_groups','telegram_send_group','telegram_group_delivery']);
     if (catalog.tools.some(t => !approved.has(t.name))) throw new Error('Unexpected tool catalog');
     let finishDecision:TurnFinishDecision|undefined;
     const customTools: ToolDefinition[] = catalog.tools.map<ToolDefinition>(tool => ({
@@ -83,7 +83,7 @@ while (!stopped) {
           arguments_.epoch = input.character.epoch;
         }
         if(tool.name==='memory_stage_delta')arguments_.invocation_id=`${input.event.id}:${input.character.epoch}:${callId}`;
-        if (tool.name === 'agent_walk' || tool.name === 'agent_turn') {
+        if (tool.name === 'agent_goto' || tool.name === 'agent_walk' || tool.name === 'agent_turn') {
           arguments_.invocation_id = `${input.event.id}:${callId}`;
           arguments_.expected_epoch = input.character.epoch;
         }
