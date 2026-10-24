@@ -30,7 +30,7 @@ function envelope(u:any) {
  const m=u.message;
  return {update_id:u.update_id,my_chat_member:u.my_chat_member?{chat:{id:u.my_chat_member.chat?.id,type:u.my_chat_member.chat?.type,title:u.my_chat_member.chat?.title,username:u.my_chat_member.chat?.username},new_chat_member:{status:u.my_chat_member.new_chat_member?.status}}:undefined,
   message:m && typeof m.text==='string' && m.text.length<=4000 ? {
-   message_id:m.message_id,date:m.date,text:m.text,from:m.from?{id:m.from.id,is_bot:m.from.is_bot}:undefined,
+   message_id:m.message_id,date:m.date,text:m.text,forward_origin:m.forward_origin?{}:undefined,forward_date:m.forward_date,from:m.from?{id:m.from.id,is_bot:m.from.is_bot}:undefined,
    chat:{id:m.chat?.id,type:m.chat?.type,title:m.chat?.title,username:m.chat?.username,is_forum:m.chat?.is_forum},sender_chat:m.sender_chat?{}:undefined,
    message_thread_id:m.message_thread_id,is_automatic_forward:m.is_automatic_forward,
    entities:Array.isArray(m.entities)?m.entities.slice(0,100):[],

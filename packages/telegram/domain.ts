@@ -1,6 +1,6 @@
 export type TelegramMessage = {
   chatId: string; messageId: string; authorId: string; text: string;
-  kind: 'private'|'group'; replyTo?: string; direct: boolean; date: number;
+  kind: 'private'|'group'; replyTo?: string; direct: boolean; date: number; forwarded?: boolean;
 };
 const id = (v: unknown): string | undefined =>
   typeof v === 'number' && Number.isSafeInteger(v) ? String(v) : undefined;
@@ -16,7 +16,7 @@ export function normalizeUpdate(update: any, botId: string, username: string): T
       e.type === 'mention' && m.text.slice(e.offset, e.offset + e.length).toLowerCase() === `@${username.toLowerCase()}`;
   });
   return { chatId, messageId, authorId:`telegram:${authorId}`, text:m.text, kind,
-    replyTo:id(m.reply_to_message?.message_id), date:m.date,
+    replyTo:id(m.reply_to_message?.message_id), date:m.date,forwarded:!!(m.forward_origin||m.forward_date),
     direct:kind === 'private' || mention || id(m.reply_to_message?.from?.id) === botId };
 }
 export type TelegramDecision = { decision:'reply'; text:string } | { decision:'silence' };

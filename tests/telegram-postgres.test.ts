@@ -42,6 +42,9 @@ test('Telegram PostgreSQL and HTTP contracts', {skip:!process.env.TEST_DATABASE_
    const command=async(text:string,author=8)=>{const u=message();u.message.text=text;u.message.from.id=author;await runtimeStore.ingest('99',owner,[u]);return u;};
    await command('/approve_group '+refs[0].approval_ref,777);
    assert.equal((await pool.query("SELECT count(*)::int n FROM telegram_bindings WHERE kind='group'")).rows[0].n,0);
+   const forwarded={...message(),message:{...message().message,text:'/approve_group '+refs[0].approval_ref,forward_origin:{type:'user'}}};forwarded.update_id=++uid;
+   await runtimeStore.ingest('99',owner,[forwarded]);
+   assert.equal((await pool.query("SELECT count(*)::int n FROM telegram_bindings WHERE kind='group'")).rows[0].n,0,'forwarding is not owner approval');
    for(const g of refs)await command('/approve_group '+g.approval_ref);
    assert.equal((await pool.query("SELECT count(*)::int n FROM telegram_bindings WHERE kind='group' AND enabled")).rows[0].n,2);
    assert.equal((await pool.query('SELECT count(*)::int n FROM runtime_autonomy WHERE enabled')).rows[0].n,0);

@@ -24,6 +24,7 @@ export async function handleRuntimeCommand(db:pg.PoolClient,store:RuntimeStore,b
  const p={characterId:b.character_id,audienceId:b.audience_id},runtime=store.withTransaction(db);
  try{
   if(['groups','approve_group','revoke_group'].includes(cmd.name)){
+   if(m.forwarded)return {text:'Для управления группами отправь команду самостоятельно, без пересылки.'};
    const page=cmd.name==='groups'&&/^\d{1,5}$/.test(cmd.argument)?Math.max(1,Number(cmd.argument)):1;
    const groups=(await db.query(`SELECT d.*,b.id AS binding_id,b.enabled FROM telegram_discovered_chats d
     LEFT JOIN telegram_bindings b ON b.bot_id=d.bot_id AND b.chat_id=d.chat_id
