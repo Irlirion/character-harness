@@ -55,6 +55,7 @@ export type BuildAppOptions = {
   tokens: CoreTokens;
   allowSystemChatPublicDemo: boolean;
   allowClientWorld?: boolean;
+  minecraftBackend?:'fabric'|'unionclef';
   deps: CoreDeps;
   runtime?: RuntimeOwnerStore;
   runtimeEngine?: RuntimeEngineStore;
@@ -70,7 +71,7 @@ function emptySocialContext(): SocialContextInput {
 }
 
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
-export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, deps, memoryInstructions = '', responseInstructions = '', telegram, images, runtime, runtimeEngine, runtimePolicy }: BuildAppOptions): FastifyInstance {
+export function buildApp({ principal, tokens, allowSystemChatPublicDemo, allowClientWorld = false, minecraftBackend='fabric', deps, memoryInstructions = '', responseInstructions = '', telegram, images, runtime, runtimeEngine, runtimePolicy }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 // Roles share a token, so budget by role rather than IP or attacker-supplied headers.
 // Audio and action leases poll frequently; keep bridge event ingestion in its own budget.
@@ -218,7 +219,7 @@ app.post('/bridge/actions/:id/lease', async req => {
 app.post('/bridge/actions/:id', async req => {
   const id = z.string().uuid().parse((req.params as {id:string}).id);
   const coordinate=z.number().finite().min(-30_000_000).max(30_000_000);const yCoordinate=z.number().finite().min(-4096).max(4096);
-  const evidenceSchema=z.object({kind:z.enum(['walk','turn']).optional(),reason:z.enum(['action_expired_before_start','client_not_ready','movement_input_busy','unsupported_action','invalid_walk_bounds','invalid_turn_bounds','unsafe_or_unsupported_step','step_became_unsafe','action_expired_mid_descent','player_flying','client_disconnected','screen_opened','world_session_mismatch','action_lease_stale','action_lease_revoked','action_expired_or_no_movement','no_position_change','rotation_not_observed','client_action_busy','test_server_gate_closed','initial_lease_invalid']).optional(),
+  const evidenceSchema=z.object({kind:z.enum(['walk','turn','goto']).optional(),reason:z.enum(['action_expired_before_start','client_not_ready','movement_input_busy','unsupported_action','invalid_walk_bounds','invalid_turn_bounds','unsafe_or_unsupported_step','step_became_unsafe','action_expired_mid_descent','player_flying','client_disconnected','screen_opened','world_session_mismatch','action_lease_stale','action_lease_revoked','action_expired_or_no_movement','no_position_change','rotation_not_observed','client_action_busy','test_server_gate_closed','initial_lease_invalid','unionclef_unavailable','unionclef_not_ready','invalid_navigation_target','navigation_stopped','navigation_timeout']).optional(),
     on_ground:z.boolean().optional(),collision_ahead:z.boolean().optional(),support_ahead:z.boolean().optional(),
     step_status:z.enum(['clear','not_grounded','collision','no_support','unknown_chunk']).optional(),
     obstacle_block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),estimated_step_up:z.number().finite().min(0).max(2).optional(),
@@ -339,7 +340,15 @@ async function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Pri
       return { ...result({ error: error.code }), isError: true };
     }
   });
-  if(!isTelegram) server.registerTool('agent_walk', {
+  if(!isTelegram&&minecraftBackend==='unionclef')server.registerTool('agent_goto',{
+    description:'Navigate through UnionClef MCP/Tungsten to a loaded local block coordinate within 32 blocks, for at most 20 seconds. Queue once, then poll agent_action_status; only completed confirms observed arrival within 2 blocks. Stops on revoked lease, expiry, disconnect or an open screen. No arbitrary commands. Block breaking/placement must be disabled in the navigation profile. Do not claim completion after queueing.',
+    inputSchema:{x:z.number().int().min(-30000000).max(30000000),y:z.number().int().min(-4096).max(4096),z:z.number().int().min(-30000000).max(30000000),duration_ms:z.number().int().min(1000).max(20000).default(20000),invocation_id:z.string().min(1).max(200),expected_epoch:z.number().int().positive()}
+  },async({x,y,z:targetZ,duration_ms,invocation_id,expected_epoch})=>{
+    if(!allowClientWorld)return {...result({error:'client_world_disabled'}),isError:true};
+    try{return result(await enqueueClientAction(scopedPrincipal,invocation_id,'goto',{x,y,z:targetZ},duration_ms,expected_epoch));}
+    catch(e){if(e instanceof DomainError)return {...result({error:e.code}),isError:true};throw e;}
+  });
+  if(!isTelegram&&minecraftBackend==='fabric') server.registerTool('agent_walk', {
     description: 'Walk briefly using normal client movement keys. Start only while grounded. forward is -1 backward, 0 neutral, 1 forward; strafe is -1 left, 0 neutral, 1 right. Both axes may be combined. A controlled downward step may briefly be airborne only while descending toward confirmed loaded support within the lesser of effective safe fall distance and 3 blocks. Never jump, sprint, break blocks, or interact. This queues an action; use agent_action_status and claim success only after state=completed. Maximum 1200 ms.',
     inputSchema: { forward:z.number().int().min(-1).max(1), strafe:z.number().int().min(-1).max(1), duration_ms:z.number().int().min(100).max(1200), invocation_id:z.string().min(1).max(200), expected_epoch:z.number().int().positive() }
   }, async ({forward,strafe,duration_ms,invocation_id,expected_epoch}) => {

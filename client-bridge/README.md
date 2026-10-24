@@ -8,7 +8,7 @@ Client-only Fabric mod for Minecraft 1.21.11, Fabric Loader 0.19.5 and Fabric AP
 ./gradlew build
 ```
 
-The distributable is `build/libs/character-harness-bridge-0.1.0.jar`.
+The distributable is `build/libs/character-harness-bridge-0.2.0.jar`.
 
 ## Configure the test client
 
@@ -72,3 +72,7 @@ The observation, movement, and STT paths have offline schema/DB-smoke and Fabric
 The model chooses `voice`, public server `chat`, or silence with `turn_finish`. Chat replies are bounded to one ordinary line of at most 256 characters and sent using the client network chat API, only in the configured demo server/world session. Commands and control characters are rejected. Voice replies use the audio queue and still appear locally for inspection; they are not posted publicly.
 
 Public chat is claimed once before sending and expires 60 seconds after reply creation. Pause/epoch changes fence stale replies. A disconnect or crash after claim can lose a message; it is never automatically resent because the server delivery outcome is unknown. Older bridge clients do not receive public chat replies. Restart Minecraft after replacing the mod.
+
+## UnionClef MCP backend
+
+Use the pinned UnionClef release and the setup script in [the migration guide](../docs/unionclef-migration.md). `unionclef_enabled=true` enables navigation through the mod's MCP, authenticated using `unionclef_mcp_token_file`. The endpoint must be loopback HTTP `/mcp` with an explicit port; redirects and arbitrary tool names are rejected. Core uses `MINECRAFT_BACKEND=unionclef` and supplies `agent_goto` instead of key-based `agent_walk`. Turn, chat, voice, observations and existing opt-ins remain available.

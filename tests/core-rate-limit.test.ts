@@ -176,3 +176,12 @@ test('image polling and results share the engine budget and reject before databa
   assert.equal((await app.inject({url:'/owner/images',headers:{authorization:`Bearer ${tokens.owner}`}})).statusCode,200);
  }finally{await app.close();await h.app.close();}
 });
+
+ test('UnionClef mode exposes the queued navigation tool instead of key walking',async()=>{
+  const h=harness();const app=buildApp({principal,tokens,deps:h.deps,allowSystemChatPublicDemo:false,minecraftBackend:'unionclef'});
+  const client=new Client({name:'unionclef-catalog',version:'1'});
+  try{const base=await app.listen({host:'127.0.0.1',port:0});await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{fetch:coreFetch,requestInit:{headers:{Authorization:`Bearer ${tokens.engine}`}}}));
+   const names=(await client.listTools()).tools.map(t=>t.name);assert.ok(names.includes('agent_goto'));assert.ok(!names.includes('agent_walk'));assert.ok(!names.includes('ExecuteCommand'));
+   const denied=await client.callTool({name:'agent_goto',arguments:{x:0,y:64,z:0,invocation_id:'test',expected_epoch:1}});assert.equal(denied.isError,true);assert.match(JSON.stringify(denied),/client_world_disabled/);
+  }finally{await client.close();await app.close();await h.app.close();}
+ });

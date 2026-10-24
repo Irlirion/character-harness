@@ -32,6 +32,8 @@ const memoryInstructions=(await readFile(new URL('../../characters/memory-rules.
 const responseInstructions=await readFile(new URL('../../characters/social-response-rules.md',import.meta.url),'utf8');
 const clientWorldSetting = process.env.BRIDGE_CLIENT_WORLD_ENABLED ?? 'false';
 if (clientWorldSetting !== 'true' && clientWorldSetting !== 'false') throw new Error('BRIDGE_CLIENT_WORLD_ENABLED must be true or false');
+const minecraftBackend=process.env.MINECRAFT_BACKEND??'unionclef';
+if(!['fabric','unionclef'].includes(minecraftBackend))throw new Error('Invalid MINECRAFT_BACKEND');
 const allowClientWorld = clientWorldSetting === 'true';
 if (audioToken.length < 32 || audioToken === ownerToken || audioToken === engineToken) throw new Error('Distinct audio token required');
 if (bridgeToken.length < 32 || new Set([bridgeToken, ownerToken, engineToken, audioToken]).size !== 4) throw new Error('Distinct bridge token required');
@@ -59,7 +61,7 @@ const app = buildApp({
   // A reviewer bridge requires explicit operator configuration; no profile is installed automatically.
   runtimePolicy:runtime&&runtimeAuth?new RuntimeAudienceGate(new RuntimePolicyGate(runtime,runtimeAuth,reviewer,reviewerConfig?reviewerConfig.timeout_ms+100:2000),pool,p=>runtime.schedule(p)):undefined,
   images:telegram && process.env.TELEGRAM_IMAGES_ENABLED==='true'?new ImageStore(pool,character.id):undefined,
-  allowSystemChatPublicDemo, allowClientWorld,
+  allowSystemChatPublicDemo, allowClientWorld,minecraftBackend:minecraftBackend as 'fabric'|'unionclef',
   memoryInstructions,
   responseInstructions,
   deps: { pool, loadSharedDesk:runtime?p=>sharedDesk(pool,p.characterId):undefined, status, search, remember, control, ingest, nextEvent:p=>nextEvent(p,!!telegram), recentConversation, loadSocialMemory:loadSocialContext, inspectEvent, stageMemory, socialCommitmentPage, complete, deferEvent,
