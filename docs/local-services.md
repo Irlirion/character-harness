@@ -1,6 +1,4 @@
-# Управление локальными сервисами
-
-На этом Mac сервисы проекта запускаются одной командой через `make`:
+# Ручное управление локальными сервисами
 
 ```sh
 make start
@@ -8,22 +6,12 @@ make stop
 make status
 ```
 
-`make start` поднимает Docker Compose с core, PostgreSQL, Codex engine, Telegram
-и STT, затем запускает пользовательские LaunchAgents Qwen TTS и audio worker.
-Compose автоматически читает `compose.override.yaml`, если он есть. Для нативных
-сервисов должны быть установлены `~/Library/LaunchAgents/org.characterharness.qwen-tts.plist`
-и `~/Library/LaunchAgents/org.characterharness.audio-worker.plist`; MLX-модель и
-Python-окружение TTS должны быть подготовлены по инструкции [audio worker](audio-worker.md).
+Автозапуска при входе в macOS и автоматических перезапусков аудио нет. Без аргументов `make` показывает справку. `make start` вручную поднимает Docker Compose, затем Qwen TTS; после готовности `/ready` запускается audio worker. Ошибка запуска или остановки возвращает ненулевой код. Повторный start сохраняет уже работающие процессы.
 
-`make stop` выгружает audio worker и TTS LaunchAgents, затем останавливает
-контейнеры Compose, включая необязательные профили. Данные PostgreSQL и runtime
-остаются в Docker volumes. Команда не удаляет контейнеры, образы, секреты или
-модельные файлы. Повторный `make start` снова загружает LaunchAgents и запускает
-Compose.
+Аудио управляется через `scripts/native-services.sh`. Локальные plist лежат в игнорируемом каталоге `work/local-services/launchagents`, а не в `~/Library/LaunchAgents`. Имена: `org.characterharness.qwen-tts.plist` и `org.characterharness.audio-worker.plist`. В обоих `RunAtLoad=false`, `KeepAlive=false`; другие триггеры запуска не задаются. Настройки окружения, пути моделей, устройства и секретов сохраняются из подготовленной установки. Старые файлы из `~/Library/LaunchAgents` нужно выгрузить и перенести сюда, выставив эти флаги, до использования ручного режима.
 
-`make status` показывает состояние контейнеров и зарегистрированные LaunchAgents.
-Если нужно применить изменения к коду нативного сервиса, выполните `make stop`,
-а затем `make start`.
+`make stop` сначала запрещает запуск и выгружает оба нативных задания по меткам, даже если plist уже удалён. Затем останавливает все профили Compose. Ошибки не скрываются, остановка оставшихся компонентов продолжается. Данные, модели, контейнеры и секреты не удаляются. `make start` снимает запрет и явно запускает задания.
 
-Для ручной работы с отдельным сервисом см. [запуск в Docker](docker.md) и
-[инструкцию audio worker](audio-worker.md).
+Compose автоматически читает `compose.override.yaml`. Хост-порт ядра задаётся `CORE_PORT` в `.env`, по умолчанию 3000; внутренний Docker-адрес остаётся `http://core:3000`. После смены хост-порта обновите `CORE_URL` в plist audio worker и `core_url` в конфигурации Fabric companion, затем перезапустите соответствующие клиенты. На этом Mac используется 3003, поскольку 3000 занят Langfuse.
+
+По умолчанию start собирает образы. Для уже подготовленных образов: `make start BUILD_FLAGS=`. После изменения кода нативного аудио используйте `make stop`, затем `make start`.
