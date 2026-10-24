@@ -1,3 +1,4 @@
+import {approvedGroups,selectGroup} from './telegram-groups.ts';
 import {MemberProfileSchema,type ProfileReader} from '../telegram/member-profile.ts';
 import {GroupDirectorySchema,type GroupReader} from '../telegram/group-directory.ts';
 import {DirectedTelegram,type DirectedReviewer} from './telegram-directed.ts';
@@ -22,7 +23,8 @@ export class TelegramStore {
   private groupReader?:GroupReader;
   private profileReader?:ProfileReader;
   async canSendGroup(p:Principal,eventId:string,epoch:number){return this.directed.available(p,eventId,epoch);}
-  async sendGroup(p:Principal,eventId:string,epoch:number,text:string){return this.directed.send(p,eventId,epoch,text);}
+  async sendGroup(p:Principal,eventId:string,epoch:number,text:string,group?:string){return this.directed.send(p,eventId,epoch,text,group);}
+  async approvedGroups(p:Principal,eventId:string,epoch:number){return this.directed.groups(p,eventId,epoch);}
   async groupDelivery(p:Principal,eventId:string,epoch:number,id:string){return this.directed.status(p,eventId,epoch,id);}
   private async tx<T>(fn:(db:DB, character:any)=>Promise<T>):Promise<T> {
     const db=await this.pool.connect();
@@ -33,7 +35,7 @@ export class TelegramStore {
       const result=await fn(db,c); await db.query('COMMIT'); return result;
     } catch(e) { await db.query('ROLLBACK'); throw e; } finally {db.release();}
   }
-  private async directoryContext(p:Principal,eventId:string,epoch:number){
+  private async directoryContext(p:Principal,eventId:string,epoch:number,group?:string){
     return this.tx(async(db,c)=>{
       assertActive(c,epoch);if(c.active_event_id!==eventId||!c.lease_until||new Date(c.lease_until)<=new Date())throw new DomainError('turn_not_current');
       const source=(await db.query(`SELECT b.*,e.author_id FROM social_events e JOIN telegram_decisions d ON d.event_id=e.id JOIN telegram_bindings b ON b.id=d.binding_id
@@ -42,8 +44,9 @@ export class TelegramStore {
       let b=source;
       if(source.kind==='private'){
         if(!source.runtime_control||source.author_id!=='telegram:'+source.chat_id)throw new DomainError('directory_owner_required');
-        const groups=(await db.query("SELECT * FROM telegram_bindings WHERE character_id=$1 AND enabled AND kind='group'",[this.characterId])).rows;b=groups.length===1?groups[0]:null;
+        b=selectGroup(await approvedGroups(db,this.characterId),group);
       }
+      if(source.kind==='group'&&group&&group!==source.id)throw new DomainError('directory_scope_denied');
       if(!b||b.kind!=='group')throw new DomainError('group_binding_required');
       const ids=(await db.query(`SELECT substring(author_id from 10) AS id FROM telegram_messages
         WHERE binding_id=$1 AND incoming AND author_id ~ '^telegram:[0-9]+$' AND observed_at>now()-interval '30 days'
@@ -52,21 +55,21 @@ export class TelegramStore {
     });
   }
   async canReadGroup(p:Principal,eventId:string,epoch:number){
-    if(!this.groupReader)return false;try{await this.directoryContext(p,eventId,epoch);return true;}catch(e){if(e instanceof DomainError)return false;throw e;}
+    if(!this.groupReader)return false;try{await this.directoryContext(p,eventId,epoch);return true;}catch(e){if(e instanceof DomainError)return e.code==='group_selection_required';throw e;}
   }
-  async groupParticipants(p:Principal,eventId:string,epoch:number){
-    const before=await this.directoryContext(p,eventId,epoch);if(!this.groupReader)throw new DomainError('group_directory_unavailable');
+  async groupParticipants(p:Principal,eventId:string,epoch:number,group?:string){
+    const before=await this.directoryContext(p,eventId,epoch,group);if(!this.groupReader)throw new DomainError('group_directory_unavailable');
     let data;try{data=GroupDirectorySchema.parse(await this.groupReader(before.chat_id,before.known_ids));}catch{throw new DomainError('group_directory_unavailable');}
-    const after=await this.directoryContext(p,eventId,epoch);
+    const after=await this.directoryContext(p,eventId,epoch,group);
     if(before.source_id!==after.source_id||before.source_revision!==after.source_revision||before.target_id!==after.target_id||before.target_revision!==after.target_revision)throw new DomainError('directory_authority_stale');
     return {...data,source:'telegram_bot_api',target:before.source_id===before.target_id?'current_group':'configured_group',observed_at:new Date().toISOString(),complete:false,
       limitation:'Bot API has no complete member-list method. Administrators and checked known message authors are partial evidence, not all members. Display names are unverified identities.'};
   }
-  async memberProfile(p:Principal,eventId:string,epoch:number,selector:string){
+  async memberProfile(p:Principal,eventId:string,epoch:number,selector:string,group?:string){
     if(!this.profileReader||!selector.trim()||selector.length>128)throw new DomainError('member_profile_unavailable');
-    const before=await this.directoryContext(p,eventId,epoch);let data;
+    const before=await this.directoryContext(p,eventId,epoch,group);let data;
     try{data=MemberProfileSchema.parse(await this.profileReader(before.chat_id,before.known_ids,selector));}catch{throw new DomainError('member_profile_unavailable');}
-    const after=await this.directoryContext(p,eventId,epoch);
+    const after=await this.directoryContext(p,eventId,epoch,group);
     if(before.source_id!==after.source_id||before.source_revision!==after.source_revision||before.target_id!==after.target_id||before.target_revision!==after.target_revision)throw new DomainError('directory_authority_stale');
     return {...data,observed_at:new Date().toISOString(),source:'telegram_bot_api'};
   }
@@ -101,7 +104,7 @@ export class TelegramStore {
       if (current && current.kind!==kind) throw new DomainError('binding_kind_conflict');
       if (current && current.enabled===enabled) return current;
       const counts=(await db.query('SELECT count(*)::int AS n FROM telegram_bindings WHERE character_id=$1 AND kind=$2 AND enabled AND id<>$3',[this.characterId,kind,current?.id??randomUUID()])).rows[0];
-      if (enabled && counts.n>=1) throw new DomainError('mvp_binding_limit');
+      if (enabled && kind==='private' && counts.n>=1) throw new DomainError('mvp_binding_limit');
       const binding=(await db.query(`INSERT INTO telegram_bindings(id,bot_id,character_id,chat_id,audience_id,kind,enabled)
         VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(bot_id,chat_id) DO UPDATE SET enabled=$7,revision=telegram_bindings.revision+1 RETURNING *`,
         [randomUUID(),botId,this.characterId,chatId,`telegram:${botId}:${chatId}`,kind,enabled])).rows[0];
@@ -140,6 +143,15 @@ export class TelegramStore {
         const inserted=await db.query(`INSERT INTO telegram_updates(bot_id,update_id,disposition) VALUES($1,$2,'ignored') ON CONFLICT DO NOTHING RETURNING update_id`,[botId,String(uid)]);
         if (inserted.rowCount) {
           const membership=u.my_chat_member;
+          const chat=membership?.chat??u.message?.chat;
+          if(chat&&Number.isSafeInteger(chat.id)&&['group','supergroup'].includes(chat.type)){
+            const status=membership?.new_chat_member?.status??'unknown';
+            await db.query(`INSERT INTO telegram_discovered_chats(bot_id,chat_id,kind,title,username,membership_status)
+             VALUES($1,$2,'group',$3,$4,$5) ON CONFLICT(bot_id,chat_id) DO UPDATE SET
+             title=excluded.title,username=excluded.username,observed_at=now(),
+             membership_status=CASE WHEN $5='unknown' THEN telegram_discovered_chats.membership_status ELSE $5 END`,
+             [botId,String(chat.id),String(chat.title??'').slice(0,256),typeof chat.username==='string'?chat.username.slice(0,64):null,status]);
+          }
           if (membership && ['left','kicked'].includes(membership.new_chat_member?.status)) {
             const b=(await db.query(`UPDATE telegram_bindings SET enabled=false,revision=revision+1 WHERE bot_id=$1 AND chat_id=$2 RETURNING id`,[botId,String(membership.chat?.id)])).rows[0];
             if(b) {

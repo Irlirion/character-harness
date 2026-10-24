@@ -63,7 +63,7 @@ while(!stopped){
   const turnHeaders={...headers,'X-Harness-Event':input.event.id,'X-Harness-Epoch':String(input.character.epoch)};
   await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{fetch:coreFetch,requestInit:{headers:turnHeaders}}));
   const catalog=(await client.listTools()).tools;
-  const allowed=new Set(['agent_get_status','agent_observe','memory_search','memory_propose','memory_stage_delta','memory_social_list','agent_walk','agent_turn','agent_action_status','telegram_read_history','telegram_group_participants','telegram_member_profile','telegram_send_group','telegram_group_delivery','image_generate','image_generation_status','turn_finish']);
+  const allowed=new Set(['agent_get_status','agent_observe','memory_search','memory_propose','memory_stage_delta','memory_social_list','agent_walk','agent_turn','agent_action_status','telegram_read_history','telegram_group_participants','telegram_member_profile','telegram_groups','telegram_send_group','telegram_group_delivery','image_generate','image_generation_status','turn_finish']);
   if(catalog.some(t=>!allowed.has(t.name)))throw new Error('unexpected_catalog');
   rpc.onRequest=async(method,p)=>{
    if(method!=='item/tool/call' || p.threadId!==threadId || !allowed.has(p.tool))throw new Error('tool_denied');

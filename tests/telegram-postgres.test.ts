@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { readFile,readdir } from 'node:fs/promises';
+import {RuntimeStore} from '../packages/storage/runtime.ts';
 import { TelegramStore } from '../packages/storage/telegram.ts';
 import {sharedDesk} from '../packages/storage/workplace.ts';
 import { buildApp } from '../apps/core/app.ts';
@@ -29,6 +30,27 @@ test('Telegram PostgreSQL and HTTP contracts', {skip:!process.env.TEST_DATABASE_
    const epoch=(await storage.status(p)).epoch;
    return store.finish(e.id,epoch,decision,decision==='reply'?'Ответ':undefined);
   };
+  await t.test('owner approves discovered groups; joins alone grant no access; revoke and duplicate commands are safe',async()=>{
+   await reset();const runtimeStore=new TelegramStore(pool,'lada',new RuntimeStore(pool));
+   const priv=await runtimeStore.bind('99','8','private',true);await runtimeStore.runtimeControl(priv.id,true);
+   const join=async(chat:number,status='member')=>runtimeStore.ingest('99',owner,[{update_id:++uid,my_chat_member:{chat:{id:chat,type:'supergroup',title:'Test '+chat},new_chat_member:{status}}}]);
+   await join(-100);await join(-200);
+   assert.equal((await pool.query("SELECT count(*)::int n FROM telegram_bindings WHERE kind='group' AND enabled")).rows[0].n,0);
+   await runtimeStore.ingest('99',owner,[message(-100,'supergroup')]);
+   assert.equal((await pool.query('SELECT count(*)::int n FROM telegram_messages')).rows[0].n,0,'pending group contents are not stored');
+   const refs=(await pool.query("SELECT approval_ref,chat_id FROM telegram_discovered_chats WHERE kind='group' ORDER BY chat_id")).rows;
+   const command=async(text:string,author=8)=>{const u=message();u.message.text=text;u.message.from.id=author;await runtimeStore.ingest('99',owner,[u]);return u;};
+   await command('/approve_group '+refs[0].approval_ref,777);
+   assert.equal((await pool.query("SELECT count(*)::int n FROM telegram_bindings WHERE kind='group'")).rows[0].n,0);
+   for(const g of refs)await command('/approve_group '+g.approval_ref);
+   assert.equal((await pool.query("SELECT count(*)::int n FROM telegram_bindings WHERE kind='group' AND enabled")).rows[0].n,2);
+   assert.equal((await pool.query('SELECT count(*)::int n FROM runtime_autonomy WHERE enabled')).rows[0].n,0);
+   const u=await command('/revoke_group '+refs[0].approval_ref);await runtimeStore.ingest('99',owner,[u]);
+   const disabled=(await pool.query('SELECT * FROM telegram_bindings WHERE chat_id=$1',[refs[0].chat_id])).rows[0];
+   assert.equal(disabled.enabled,false);assert.equal(disabled.revision,2);
+   await join(Number(refs[0].chat_id),'left');await command('/approve_group '+refs[0].approval_ref);
+   assert.equal((await pool.query('SELECT enabled FROM telegram_bindings WHERE id=$1',[disabled.id])).rows[0].enabled,false,'left bots cannot be approved');
+  });
   await t.test('dedup, durable offset, isolated private reply and replayed completion',async()=>{
    await reset();const b=await store.bind('99','8','private',true);
    const u=message();await store.ingest('99',owner,[u]);await store.ingest('99',owner,[u]);

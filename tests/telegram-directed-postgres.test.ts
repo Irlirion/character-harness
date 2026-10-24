@@ -20,6 +20,18 @@ test('natural-language private owner group sends are reviewed, scoped and durabl
    const c=(await pool.query("UPDATE characters SET epoch=epoch+1,active_event_id=$1,lease_until=clock_timestamp()+interval '90 seconds' WHERE id='lada' RETURNING epoch",[e.id])).rows[0];return {...e,epoch:c.epoch};
   };
   const scope=()=>({...p,audienceId:priv.audience_id});
+  await t.test('multiple groups require selection and receipts cannot switch target',async()=>{
+   await reset();const second=await tg.bind('99','-100','group',true);const e=await event('напиши в группу Test');
+   assert.equal(await tg.canSendGroup(scope(),e.id,e.epoch),true);assert.equal(await tg.canReadGroup(scope(),e.id,e.epoch),true);
+   assert.equal((await tg.approvedGroups(scope(),e.id,e.epoch)).length,2);
+   await assert.rejects(tg.sendGroup(scope(),e.id,e.epoch,'Привет'),{code:'group_selection_required'});
+   await assert.rejects(tg.groupParticipants(scope(),e.id,e.epoch),{code:'group_selection_required'});
+   const sent=await tg.sendGroup(scope(),e.id,e.epoch,'Привет',second.id);
+   assert.equal((await pool.query('SELECT binding_id FROM telegram_outbox WHERE id=$1',[sent.id])).rows[0].binding_id,second.id);
+   await assert.rejects(tg.sendGroup(scope(),e.id,e.epoch,'Привет',group.id),{code:'directed_message_already_requested'});
+   await tg.groupParticipants(scope(),e.id,e.epoch,second.id);assert.equal(reads.at(-1).chatId,'-100');
+   await assert.rejects(tg.groupParticipants(scope(),e.id,e.epoch,'unapproved'),{code:'group_binding_required'});
+  });
   await t.test('plain request publishes once without reply target and status confirms Telegram receipt',async()=>{
    await reset();const e=await event();assert.equal(await tg.canSendGroup(scope(),e.id,e.epoch),true);
    const [a,b]=await Promise.all([tg.sendGroup(scope(),e.id,e.epoch,'Привет! Как ваши постройки?'),tg.sendGroup(scope(),e.id,e.epoch,'Привет! Как ваши постройки?')]);assert.equal(a.id,b.id);
