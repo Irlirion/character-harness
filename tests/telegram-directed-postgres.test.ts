@@ -20,6 +20,18 @@ test('natural-language private owner group sends are reviewed, scoped and durabl
    const c=(await pool.query("UPDATE characters SET epoch=epoch+1,active_event_id=$1,lease_until=clock_timestamp()+interval '90 seconds' WHERE id='lada' RETURNING epoch",[e.id])).rows[0];return {...e,epoch:c.epoch};
   };
   const scope=()=>({...p,audienceId:priv.audience_id});
+  await t.test('multiple groups require selection and receipts cannot switch target',async()=>{
+   await reset();const second=await tg.bind('99','-100','group',true);const e=await event('напиши в группу Test');
+   assert.equal(await tg.canSendGroup(scope(),e.id,e.epoch),true);assert.equal(await tg.canReadGroup(scope(),e.id,e.epoch),true);
+   assert.equal((await tg.approvedGroups(scope(),e.id,e.epoch)).length,2);
+   await assert.rejects(tg.sendGroup(scope(),e.id,e.epoch,'Привет'),{code:'group_selection_required'});
+   await assert.rejects(tg.groupParticipants(scope(),e.id,e.epoch),{code:'group_selection_required'});
+   const sent=await tg.sendGroup(scope(),e.id,e.epoch,'Привет',second.id);
+   assert.equal((await pool.query('SELECT binding_id FROM telegram_outbox WHERE id=$1',[sent.id])).rows[0].binding_id,second.id);
+   await assert.rejects(tg.sendGroup(scope(),e.id,e.epoch,'Привет',group.id),{code:'directed_message_already_requested'});
+   await tg.groupParticipants(scope(),e.id,e.epoch,second.id);assert.equal(reads.at(-1).chatId,'-100');
+   await assert.rejects(tg.groupParticipants(scope(),e.id,e.epoch,'unapproved'),{code:'group_binding_required'});
+  });
   await t.test('plain request publishes once without reply target and status confirms Telegram receipt',async()=>{
    await reset();const e=await event();assert.equal(await tg.canSendGroup(scope(),e.id,e.epoch),true);
    const [a,b]=await Promise.all([tg.sendGroup(scope(),e.id,e.epoch,'Привет! Как ваши постройки?'),tg.sendGroup(scope(),e.id,e.epoch,'Привет! Как ваши постройки?')]);assert.equal(a.id,b.id);
@@ -34,7 +46,7 @@ test('natural-language private owner group sends are reviewed, scoped and durabl
    const second=await event('Поздравь его с наступающим хелуином');await tg.sendGroup(scope(),second.id,second.epoch,'Ильсур, с наступающим Хеллоуином!');
    const checked=reviews.at(-1);assert.ok(checked.current_owner_request.includes('Поздравь его'));
    assert.equal(checked.recent_confirmed_group_deliveries.length,1);assert.ok(checked.recent_confirmed_group_deliveries[0].owner_request.includes('Ильсуру'));assert.equal(checked.recent_confirmed_group_deliveries[0].sent_text,'Ильсур, привет!');
-   assert.equal(checked.target,'single_configured_group');const next=await tg.claim('99',owner);assert.equal(next!.chat_id,'-42');
+   assert.equal(checked.target,'selected_approved_group');const next=await tg.claim('99',owner);assert.equal(next!.chat_id,'-42');
   });
   await t.test('unconfirmed, old and reconfigured-group sends cannot become confirmed follow-up context',async()=>{
    for(const kind of ['unknown','old','reconfigured']){

@@ -8,9 +8,9 @@ import {assertCurrentProfile} from '../storage/runtime-authorization.ts';
 import type {RuntimeStore} from '../storage/runtime.ts';
 import type {TelegramMessage} from './domain.ts';
 
-const help='Задачи: /task <что спланировать>\n/tasks — список\n/status [ID] — состояние и вопрос\n/result [ID] — результат\n/answer [ID] <ответ> — продолжить\n/cancel [ID] — отменить. Без ID выбирается последняя подходящая задача. Это планирование, без действий в игре.\n/autonomy on | off — самостоятельная работа в группе\n/desk — общий стол и отдельные заметки группы';
+const help='/groups — группы и коды\n/approve_group <код> — одобрить\n/revoke_group <код> — отключить\n'+'Задачи: /task <что спланировать>\n/tasks — список\n/status [ID] — состояние и вопрос\n/result [ID] — результат\n/answer [ID] <ответ> — продолжить\n/cancel [ID] — отменить. Без ID выбирается последняя подходящая задача. Это планирование, без действий в игре.\n/autonomy on | off — самостоятельная работа в группе\n/desk — общий стол и отдельные заметки группы';
 export function runtimeCommand(text:string,username:string){
- const match=/^\/(task|tasks|status|result|answer|cancel|help_tasks|autonomy|desk)(?:@([a-zA-Z0-9_]+))?(?:\s+([\s\S]*))?$/.exec(text.trim());
+ const match=/^\/(task|tasks|status|result|answer|cancel|help_tasks|autonomy|desk|groups|approve_group|revoke_group)(?:@([a-zA-Z0-9_]+))?(?:\s+([\s\S]*))?$/.exec(text.trim());
  if(!match||match[2]&&match[2].toLowerCase()!==username.toLowerCase())return null;
  return {name:match[1],argument:(match[3]??'').trim()};
 }
@@ -23,12 +23,42 @@ export async function handleRuntimeCommand(db:pg.PoolClient,store:RuntimeStore,b
  if(!b.runtime_control||b.kind!=='private'||m.kind!=='private'||m.authorId!=='telegram:'+b.chat_id)return {text:''};
  const p={characterId:b.character_id,audienceId:b.audience_id},runtime=store.withTransaction(db);
  try{
+  if(['groups','approve_group','revoke_group'].includes(cmd.name)){
+   if(m.forwarded)return {text:'Для управления группами отправь команду самостоятельно, без пересылки.'};
+   const page=cmd.name==='groups'&&/^\d{1,5}$/.test(cmd.argument)?Math.max(1,Number(cmd.argument)):1;
+   const groups=(await db.query(`SELECT d.*,b.id AS binding_id,b.enabled FROM telegram_discovered_chats d
+    LEFT JOIN telegram_bindings b ON b.bot_id=d.bot_id AND b.chat_id=d.chat_id
+    WHERE d.bot_id=$1 AND d.kind='group' AND ($2::uuid IS NULL OR d.approval_ref=$2) ORDER BY d.observed_at DESC,d.approval_ref LIMIT 9 OFFSET $3`,[b.bot_id,cmd.name==='groups'?null:uuid(cmd.argument)?cmd.argument:'00000000-0000-0000-0000-000000000000',cmd.name==='groups'?(page-1)*8:0])).rows;
+   if(cmd.name==='groups')return {text:groups.length?groups.slice(0,8).map(g=>
+    (g.title||g.username||'Группа').replace(/[\r\n]/g,' ').slice(0,120)+' · '+(g.enabled?'одобрена':'не одобрена')+' · '+g.membership_status+'\n'+g.approval_ref).join('\n\n')+(groups.length>8?'\nЕщё: /groups '+(page+1):''):'Пока нет обнаруженных групп. Добавь бота в группу, затем открой /groups.'};
+   const g=groups.find(g=>g.approval_ref===cmd.argument);
+   if(!g)return {text:'Укажи точный код группы из /groups.'};
+   const enabled=cmd.name==='approve_group';
+   if(enabled&&!['member','administrator','creator'].includes(g.membership_status))return {text:'Сначала добавь бота в эту группу заново. Нужен подтверждённый Telegram вход; затем /groups.'};
+   if(g.enabled===enabled)return {text:enabled?'Группа уже одобрена.':'Группа уже отключена.'};
+   const target=(await db.query(`INSERT INTO telegram_bindings(id,bot_id,character_id,chat_id,audience_id,kind,enabled)
+    VALUES(gen_random_uuid(),$1,$2,$3,$4,'group',$5) ON CONFLICT(bot_id,chat_id) DO UPDATE SET enabled=$5,revision=telegram_bindings.revision+1 RETURNING id`,
+    [b.bot_id,b.character_id,g.chat_id,`telegram:${b.bot_id}:${g.chat_id}`,enabled])).rows[0];
+   await db.query("UPDATE telegram_outbox SET state='cancelled' WHERE binding_id=$1 AND state IN ('pending','retry_wait')",[target.id]);
+   await db.query('UPDATE telegram_messages SET consumed=true WHERE binding_id=$1',[target.id]);
+   await db.query('UPDATE social_events SET processed=true WHERE NOT processed AND id IN (SELECT event_id FROM telegram_decisions WHERE binding_id=$1)',[target.id]);
+   // Fence old work. The command is handled before creating its own reply event.
+   await db.query('UPDATE runtime_autonomy SET enabled=false,revision=revision+1,updated_at=now() WHERE binding_id=$1',[target.id]);
+   await db.query('DELETE FROM social_memory_staging WHERE character_id=$1 AND event_id=(SELECT active_event_id FROM characters WHERE id=$1)',[b.character_id]);
+   await db.query('UPDATE characters SET epoch=epoch+1,lease_until=NULL,active_event_id=NULL WHERE id=$1',[b.character_id]);
+   return {text:enabled?'Группа одобрена. Можно поручать сообщения и обращаться к боту в группе. Самостоятельные первые сообщения выключены.':'Группа отключена. Ожидающие сообщения отменены.'};
+  }
   if(cmd.name==='autonomy'||cmd.name==='desk'){
-   const group=(await db.query("SELECT b.*,a.enabled AS autonomous,a.next_wake_at FROM telegram_bindings b LEFT JOIN runtime_autonomy a ON a.binding_id=b.id WHERE b.character_id=$1 AND b.kind='group' AND b.enabled",[b.character_id])).rows[0];
+   const parts=cmd.argument.split(/\s+/).filter(Boolean);
+   const action=cmd.name==='autonomy'&&['on','off'].includes(parts[0])?parts.shift():undefined;
+   const selector=parts.join(' ');
+   const groups=(await db.query("SELECT b.*,a.enabled AS autonomous,a.next_wake_at,d.approval_ref FROM telegram_bindings b LEFT JOIN runtime_autonomy a ON a.binding_id=b.id LEFT JOIN telegram_discovered_chats d ON d.bot_id=b.bot_id AND d.chat_id=b.chat_id WHERE b.character_id=$1 AND b.kind='group' AND b.enabled",[b.character_id])).rows;
+   const group=selector?groups.find(g=>g.approval_ref===selector):groups.length===1?groups[0]:undefined;
+   if((selector&&!group)||(!group&&groups.length>1&&cmd.name==='autonomy'))return {text:'Выбери код из /groups: /autonomy on <код>, /autonomy off <код> или /desk <код>.'};
    if(!group&&cmd.name==='autonomy')return {text:'Нет подключённой группы.'};
    if(cmd.name==='autonomy'){
-    if(cmd.argument&&!['on','off'].includes(cmd.argument))return {text:'/autonomy on | off — управление; /autonomy — состояние; /desk — рабочий стол группы'};
-    if(cmd.argument){await configureAutonomy(db,b.character_id,group.id,cmd.argument==='on');group.autonomous=cmd.argument==='on';}
+    if(cmd.argument&&!action&&!selector)return {text:'/autonomy on | off — управление; /autonomy — состояние; /desk — рабочий стол группы'};
+    if(action){await configureAutonomy(db,b.character_id,group.id,action==='on');group.autonomous=action==='on';}
     return {text:'Автономность группы: '+(group.autonomous?'включена':'выключена')+'\nПробуждения раз в 2 часа; 09–21 по Германии; до 2 первых сообщений за сутки. Молчание — допустимое решение. /desk'};
    }
    const ctx=await deskContext(db,{characterId:b.character_id,audienceId:group?.audience_id??b.audience_id});
