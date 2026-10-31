@@ -75,4 +75,6 @@ Public chat is claimed once before sending and expires 60 seconds after reply cr
 
 ## UnionClef MCP backend
 
-Use the pinned UnionClef release and the setup script in [the migration guide](../docs/unionclef-migration.md). `unionclef_enabled=true` enables navigation through the mod's MCP, authenticated using `unionclef_mcp_token_file`. The endpoint must be loopback HTTP `/mcp` with an explicit port; redirects and arbitrary tool names are rejected. Core uses `MINECRAFT_BACKEND=unionclef` and supplies `agent_goto` instead of key-based `agent_walk`. Turn, chat, voice, observations and existing opt-ins remain available.
+Use the pinned release and setup script in [the workspace guide](../docs/unionclef-migration.md). With `unionclef_workspace_enabled=true`, the companion publishes visible creatures/items and enforces the full-workspace heartbeat locally. Core connects directly to the authenticated UnionClef MCP and exposes its complete published tool catalog through `minecraft_tools`/`minecraft_call`, including from the verified owner Telegram DM. No upstream instructions are elevated to authority. `minecraft_stop` and the client watchdog stop the independent task engines.
+
+The optional `compose.unionclef.yaml` configures the core connection; the MCP token remains a mounted secret. Setup enables block breaking/placement and backs up previous settings. Without full-workspace configuration, `unionclef_enabled=true` retains the older navigation-only `agent_goto` fallback. Chat, voice, observation opt-ins and the configured server scope remain in effect.
