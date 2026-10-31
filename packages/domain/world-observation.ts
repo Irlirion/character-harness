@@ -9,6 +9,7 @@ const player = z.object({
   bearing_degrees:coordinate(-180,180), line_of_sight:z.boolean()
 }).strict();
 const crosshair = z.object({
+  entity_type:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),
   type:z.enum(['none','miss','block','player','entity']),
   player_uuid:z.string().uuid().optional(), player_name:z.string().regex(/^[A-Za-z0-9_]{1,16}$/).optional(), distance:coordinate(0,8).optional(),
   block_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),
@@ -17,6 +18,7 @@ const crosshair = z.object({
 const self = z.object({
   x:coordinate(-30_000_000,30_000_000), y:coordinate(-4096,4096), z:coordinate(-30_000_000,30_000_000),
   yaw:coordinate(-360,360), pitch:coordinate(-90,90), vx:coordinate(-10,10), vy:coordinate(-10,10), vz:coordinate(-10,10),
+  minecraft_workspace_ready:z.boolean().optional(),
   navigation_backend:z.literal('unionclef_mcp').optional(),
   on_ground:z.boolean(), health:coordinate(0,1000), dimension:z.string().min(1).max(100),
   collision_ahead:z.boolean(), support_ahead:z.boolean(),
@@ -29,7 +31,13 @@ const self = z.object({
 const time = z.string().refine(v=>Number.isFinite(Date.parse(v)),'invalid_timestamp');
 const connected = z.object({
   session_id:z.string().uuid(), connected:z.literal(true), server:z.literal(SYSTEM_CHAT_SERVER), observed_at:time,
-  self, players:z.array(player).max(8), crosshair
+  self, players:z.array(player).max(8),
+  entities:z.array(z.object({
+    uuid:z.string().uuid(),type:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128),
+    x:coordinate(-30_000_000,30_000_000),y:coordinate(-4096,4096),z:coordinate(-30_000_000,30_000_000),
+    distance:coordinate(0,32),bearing_degrees:coordinate(-180,180),line_of_sight:z.literal(true),
+    item_id:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128).optional(),count:z.number().int().min(1).max(9999).optional()
+  }).strict()).max(64).optional(),crosshair
 }).strict();
 const disconnected = z.object({session_id:z.string().uuid(),connected:z.literal(false),server:z.null(),observed_at:time}).strict();
 export const worldObservationSchema = z.discriminatedUnion('connected',[connected,disconnected]);

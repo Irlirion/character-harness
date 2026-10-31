@@ -34,12 +34,12 @@ if(metadata.id!=='altoclef'||metadata.version!=='1.21.11-0.95.63')throw new Erro
 s.mcpEnabled=true;s.mcpPort=25350;
 if(typeof s.mcpAuthToken!=='string'||! /^[A-Za-z0-9_-]{32,128}$/.test(s.mcpAuthToken))s.mcpAuthToken=randomBytes(32).toString('hex');
 if(t.configVersion!==undefined&&t.configVersion!==2)throw new Error('Unsupported Tungsten config version; restore/migrate it explicitly');
-t.configVersion=2;t.allowBreak=false;t.allowPlace=false;
+t.configVersion=2;t.allowBreak=true;t.allowPlace=true;
 const tokenPath=join(config,'character-harness-unionclef-mcp.token');
-for(const [key,value] of Object.entries({unionclef_enabled:'true',unionclef_mcp_url:'http://127.0.0.1:25350/mcp',unionclef_mcp_token_file:tokenPath})){
+for(const [key,value] of Object.entries({unionclef_workspace_enabled:'true',unionclef_enabled:'true',unionclef_mcp_url:'http://127.0.0.1:25350/mcp',unionclef_mcp_token_file:tokenPath})){
  const line=key+'='+value;if(new RegExp('^'+key+'=.*$','m').test(props))props=props.replace(new RegExp('^'+key+'=.*$','m'),line);else props+='\n'+line;
 }
-if(!args.includes('--apply')){console.log(JSON.stringify({dry_run:true,game,release,backend:'unionclef_mcp',preserves_chat_voice:true,block_changes:false}));process.exit(0);}
+if(!args.includes('--apply')){console.log(JSON.stringify({dry_run:true,game,release,backend:'unionclef_mcp',preserves_chat_voice:true,block_changes:true,full_mcp_workspace:true}));process.exit(0);}
 const backup=join(game,'character-harness-backups','unionclef-'+new Date().toISOString().replace(/[:.]/g,'-'));
 await mkdir(backup,{recursive:true,mode:0o700});
 const backups=[settings,tungstenPath,propsPath,tokenPath,...(await readdir(mods)).filter(n=>/^character-harness-bridge-.*\.jar$/.test(n)||/^unionclef.*\.jar$/.test(n)).map(n=>join(mods,n))];

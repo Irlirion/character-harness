@@ -11,7 +11,7 @@ import java.util.Properties;
 
 record BridgeConfig(String coreUrl, String token, String characterName, boolean systemChatEnabled, String systemChatServer,
                     boolean actionsEnabled, boolean observationEnabled, String actionServer, boolean sttEnabled, String voiceServer,
-                    String sttUrl, String sttToken, boolean unionclefEnabled,String unionclefUrl,String unionclefToken) {
+                    String sttUrl, String sttToken, boolean workspaceEnabled,boolean unionclefEnabled,String unionclefUrl,String unionclefToken) {
     static final String SYSTEM_CHAT_SERVER = "mc.agicraft.ru:25565";
 
     static BridgeConfig load() throws IOException {
@@ -57,7 +57,7 @@ record BridgeConfig(String coreUrl, String token, String characterName, boolean 
             unionclefToken=Files.readString(Path.of(tokenFile)).trim();
             if(unionclefToken.length()<32)throw new IOException("UnionClef token is invalid");
         }
-        return new BridgeConfig(coreUrl, token, characterName, systemChatEnabled, systemChatServer, actionsEnabled, observationEnabled, actionServer, sttEnabled, voiceServer, sttUrl, sttToken,unionclefEnabled,unionclefUrl,unionclefToken);
+        return new BridgeConfig(coreUrl, token, characterName, systemChatEnabled, systemChatServer, actionsEnabled, observationEnabled, actionServer, sttEnabled, voiceServer, sttUrl, sttToken,strictBoolean(properties.getProperty("unionclef_workspace_enabled","false"),"unionclef_workspace_enabled"),unionclefEnabled,unionclefUrl,unionclefToken);
     }
 
     private static boolean strictBoolean(String value, String property) throws IOException {

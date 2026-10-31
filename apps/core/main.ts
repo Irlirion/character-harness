@@ -1,3 +1,4 @@
+import { UnionClefWorkspace } from '../../packages/minecraft/unionclef.ts';
 import {MemberProfileSchema} from '../../packages/telegram/member-profile.ts';
 import {GroupDirectorySchema} from '../../packages/telegram/group-directory.ts';
 import {sharedDesk} from '../../packages/storage/workplace.ts';
@@ -54,9 +55,15 @@ const telegram=telegramToken?new TelegramStore(pool,character.id,runtime,reviewe
  const r=await fetch('http://telegram:3001/member-profile',{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${telegramToken}`,'Content-Type':'application/json'},body:JSON.stringify({chat_id,known_user_ids,selector}),signal:AbortSignal.timeout(25000)});
  if(!r.ok)throw new Error('profile_worker_unavailable');return MemberProfileSchema.parse(await r.json());
 }):undefined;
+const minecraft=process.env.UNIONCLEF_MCP_URL?new UnionClefWorkspace({url:process.env.UNIONCLEF_MCP_URL,token:secret('UNIONCLEF_MCP_TOKEN'),pool,characterId:character.id,access:async()=>{
+ const state=await status(principal);const observation=await latestWorldObservation(principal);
+ if(!allowClientWorld||state.paused||observation.stale||!observation.connected||observation.server!=='mc.agicraft.ru:25565'||!observation.snapshot?.self?.minecraft_workspace_ready)throw new Error('minecraft_unavailable');
+ return {epoch:state.epoch,session:observation.session_id};
+}}):undefined;
+minecraft?.start();
 const app = buildApp({
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken,telegram:telegramToken },
-  telegram,
+  telegram,minecraft,
   runtime, runtimeEngine:runtime,
   // A reviewer bridge requires explicit operator configuration; no profile is installed automatically.
   runtimePolicy:runtime&&runtimeAuth?new RuntimeAudienceGate(new RuntimePolicyGate(runtime,runtimeAuth,reviewer,reviewerConfig?reviewerConfig.timeout_ms+100:2000),pool,p=>runtime.schedule(p)):undefined,
@@ -67,7 +74,7 @@ const app = buildApp({
   deps: { pool, loadSharedDesk:runtime?p=>sharedDesk(pool,p.characterId):undefined, status, search, remember, control, ingest, nextEvent:p=>nextEvent(p,!!telegram), recentConversation, loadSocialMemory:loadSocialContext, inspectEvent, stageMemory, socialCommitmentPage, complete, deferEvent,
     enqueueSpeech, claimSpeech, speechState, updateSpeech, enqueueClientAction, clientActionStatus, clientActionLease, claimClientAction, finishClientAction, saveWorldObservation, latestWorldObservation, cancelClientActions:cancelActiveClientActions }
 });
-const shutdown = async () => { await app.close(); await pool.end(); };
+const shutdown = async () => { await minecraft?.close(); await app.close(); await pool.end(); };
 process.once('SIGTERM', () => { void shutdown(); });
 process.once('SIGINT', () => { void shutdown(); });
 await app.listen({ host: '0.0.0.0', port: Number(process.env.PORT ?? 3000) });
