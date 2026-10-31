@@ -44,3 +44,7 @@ minecraft.say(message)
 ## Голос
 
 Голосовой вывод через Simple Voice Chat включён в социальный MVP. Текущая реализация использует client-only Fabric bridge и native macOS audio worker; собственный серверный addon/plugin не требуется. Исходящая речь через Qwen → Loopback → SVC подтверждена пользователем. Подробности: [голосовая интеграция](minecraft-voice.md) и [audio worker](../audio-worker.md). Описанный выше Mineflayer-путь остаётся проектным вариантом и не описывает текущий игровой клиент.
+
+## UnionClef MCP workspace
+
+UnionClef 0.95.63 (Minecraft 1.21.11) supplies its full authenticated MCP catalog: perception, navigation, inventory, mining, building, combat, menus and game commands. Core exposes discovery/call/stop tools to Minecraft turns and verified owner Telegram DM turns. The optional `compose.unionclef.yaml` enables the connection; the legacy navigation adapter remains a fallback. The Fabric companion remains responsible for trusted session observations, signed/system chat, voice and delivery. Setup, permissions and rollback: [UnionClef migration](../unionclef-migration.md).
