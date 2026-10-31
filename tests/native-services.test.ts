@@ -16,6 +16,10 @@ root=Path(os.environ['FIXTURE_DIR']);file=root/'state.json';state=json.loads(fil
 a=sys.argv[1:];label=a[-1].split('/')[-1].removesuffix('.plist');entry=state.setdefault(label,{})
 with (root/'calls').open('a') as f:f.write(' '.join(a)+'\n')
 if a[0]=='print':
+ if entry.get('unload_polls',0)>0:
+  entry['unload_polls']-=1
+  if entry['unload_polls']==0:entry['loaded']=False
+  file.write_text(json.dumps(state))
  if not entry.get('loaded'):sys.exit(1)
  print('state = running\npid = 123')
 elif a[0]=='disable':entry['disabled']=True
@@ -25,7 +29,8 @@ elif a[0]=='bootstrap':
  entry['loaded']=True
 elif a[0]=='bootout':
  if os.environ.get('FAIL_BOOTOUT')==label:sys.exit(5)
- entry['loaded']=False
+ if os.environ.get('DELAY_BOOTOUT'):entry['unload_polls']=3
+ else:entry['loaded']=False
 file.write_text(json.dumps(state))
 `,{mode:0o700});
  await writeFile(probe,'#!/bin/sh\necho ready >> "$FIXTURE_DIR/calls"\n',{mode:0o700});
@@ -55,5 +60,12 @@ test('missing configuration fails preflight and bare make does not start service
   await rm(join(f.agents,labels[1]+'.plist'));assert.throws(()=>f.run('check'));
   execFileSync('make',[],{env:f.env,stdio:'pipe'});
   await assert.rejects(readFile(join(f.dir,'calls'),'utf8'),{code:'ENOENT'});
+ }finally{await rm(f.dir,{recursive:true,force:true});}
+});
+
+test('stop waits for asynchronous launchctl unloading without reporting a false failure',async()=>{
+ const f=await fixture();try{
+  f.run('start');f.run('stop',{DELAY_BOOTOUT:'1'});
+  const state=await f.state();for(const l of labels)assert.equal(state[l].loaded,false);
  }finally{await rm(f.dir,{recursive:true,force:true});}
 });

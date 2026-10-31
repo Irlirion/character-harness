@@ -46,7 +46,13 @@ case "$mode" in
    if "$ctl" print "$service" >/dev/null 2>&1; then
     if ! "$ctl" bootout "$service"; then failed=1; fi
    fi
-   if "$ctl" print "$service" >/dev/null 2>&1; then echo "Service is still loaded: $label" >&2; failed=1; fi
+   # launchctl may return before the job disappears from the service registry.
+   attempts=0
+   while "$ctl" print "$service" >/dev/null 2>&1; do
+    attempts=$((attempts+1))
+    if test "$attempts" -ge 20; then echo "Service is still loaded: $label" >&2; failed=1; break; fi
+    "$sleeper" 0.1
+   done
   done
   exit "$failed"
  ;;
