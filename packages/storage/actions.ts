@@ -3,7 +3,7 @@ import type { Principal } from '../domain/policy.ts';
 import { assertActive, assertReplay, DomainError } from '../domain/policy.ts';
 import { pool } from './db.ts';
 
-export type ClientActionKind = 'walk' | 'turn';
+export type ClientActionKind = 'walk' | 'turn' | 'goto';
 export type ClientAction = { id: string; kind: ClientActionKind; args: Record<string, number>; duration_ms: number; claim_id?: string; epoch: number; session_id:string; expires_at: string };
 const terminal = new Set(['completed', 'failed', 'cancelled', 'expired']);
 
@@ -22,7 +22,7 @@ export async function enqueueClientAction(p: Principal, invocationId: string, ki
     assertActive(c, epoch);
     if (c.active_runtime_turn_id) throw new DomainError('runtime_tools_disabled');
     if (!c.lease_until || new Date(c.lease_until).getTime() <= Date.now()) throw new DomainError('lease_expired');
-    const observation=(await db.query(`SELECT session_id FROM world_observations WHERE character_id=$1 AND audience_id=$2
+    const observation=(await db.query(`SELECT session_id,snapshot FROM world_observations WHERE character_id=$1 AND audience_id=$2
       AND connected AND server='mc.agicraft.ru:25565' AND received_at>now()-interval '2500 milliseconds' FOR SHARE`,[p.characterId,p.audienceId])).rows[0];
     if(!observation)throw new DomainError('world_observation_stale');
     const old = (await db.query(`SELECT id,state,epoch,expires_at,kind,args,duration_ms FROM client_actions WHERE character_id=$1 AND audience_id=$2 AND invocation_id=$3`, [p.characterId, p.audienceId, invocationId])).rows[0];
@@ -33,9 +33,17 @@ export async function enqueueClientAction(p: Principal, invocationId: string, ki
     }
     const active = await db.query("SELECT 1 FROM client_actions WHERE character_id=$1 AND audience_id=$2 AND state IN ('pending','claimed') AND expires_at>now() LIMIT 1", [p.characterId,p.audienceId]);
     if (active.rowCount) throw new DomainError('client_action_busy');
+    if(kind==='goto'){
+      const self=observation.snapshot?.self;
+      if(self?.navigation_backend!=='unionclef_mcp')throw new DomainError('unionclef_not_ready');
+      if(!Number.isInteger(durationMs)||durationMs<1000||durationMs>20000
+        ||Object.keys(args).sort().join(',')!=='x,y,z'||![args.x,args.y,args.z].every(Number.isSafeInteger)
+        ||Math.abs(args.x)>30000000||Math.abs(args.z)>30000000||args.y < -4096||args.y>4096
+        ||Math.hypot(args.x+0.5-self.x,args.y-self.y,args.z+0.5-self.z)>32)throw new DomainError('invalid_navigation_target');
+    }
     const budget=(await db.query(`SELECT count(*)::int AS n,coalesce(sum(duration_ms),0)::int AS duration_ms FROM client_actions
       WHERE character_id=$1 AND audience_id=$2 AND epoch=$3 AND created_at>now()-interval '2 minutes'`,[p.characterId,p.audienceId,c.epoch])).rows[0];
-    if(budget.n>=4||budget.duration_ms+durationMs>4000)throw new DomainError('client_action_turn_budget');
+    if(budget.n>=4||budget.duration_ms+durationMs>(kind==='goto'?20000:4000))throw new DomainError('client_action_turn_budget');
     const id = randomUUID();
     const expires = new Date(Date.now() + durationMs + 4000).toISOString();
     await db.query(`INSERT INTO client_actions(id,character_id,audience_id,invocation_id,epoch,session_id,kind,args,duration_ms,state,expires_at)

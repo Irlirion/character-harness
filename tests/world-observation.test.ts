@@ -20,3 +20,12 @@ test('world observation rejects invalid or oversized obstacle diagnostics',()=>{
   assert.equal(worldObservationSchema.safeParse({...base,self:{...base.self,estimated_step_up:2.01} }).success,false);
   assert.equal(worldObservationSchema.safeParse({...base,self:{...base.self,nearest_support_drop:3.01} }).success,false);
 });
+
+test('visible chickens and dropped items carry entity types; hidden or oversized scenes are rejected',()=>{
+ const chicken={uuid:'22222222-2222-4222-8222-222222222222',type:'minecraft:chicken',x:1,y:66,z:2,distance:2.24,bearing_degrees:27,line_of_sight:true};
+ const parsed=worldObservationSchema.parse({...base,entities:[chicken],crosshair:{type:'entity',entity_type:'minecraft:chicken',distance:2.24}});
+ assert.equal(parsed.connected&&parsed.entities?.[0].type,'minecraft:chicken');
+ assert.equal(worldObservationSchema.safeParse({...base,entities:[{...chicken,line_of_sight:false}]}).success,false);
+ assert.equal(worldObservationSchema.safeParse({...base,entities:Array(65).fill(chicken)}).success,false);
+ assert.equal(worldObservationSchema.safeParse({...base,entities:[{...chicken,distance:33}]}).success,false);
+});

@@ -120,7 +120,8 @@ test('durable runtime policy bindings and resource accounting',{skip:!process.en
     if(r.phase==='output'){outputs++;if(change)await auth.installProfile(p,testProfile({version:'changed'}));}
     return allowTestReviewer(r,s);
    };
-   const g=gate(reviewer);const w=(await claim(g)).work!;await start(g,w);const body=decide(w);
+   // This reviewer deliberately commits a database profile change; allow that round trip.
+   const g=new RuntimePolicyGate(runtime,auth,reviewer,2000);const w=(await claim(g)).work!;await start(g,w);const body=decide(w);
    const saved=await g.decide(p,body);assert.deepEqual(await g.decide(p,body),saved);assert.equal(outputs,1);
    await assert.rejects(g.decide(p,{...body,checkpoint:'Altered output'}),{code:'runtime_approval_invalid'});
    await db.query("UPDATE runtime_wakeups SET available_at=clock_timestamp()-interval '1 second' WHERE state='pending'");

@@ -1,0 +1,14 @@
+# Optional full Minecraft workspace; combine with the normal deployment files.
+# UNIONCLEF_MCP_TOKEN_PATH is the host path produced by setup-unionclef.ts.
+services:
+  core:
+    environment:
+      MINECRAFT_BACKEND: unionclef
+      BRIDGE_CLIENT_WORLD_ENABLED: 'true'
+      UNIONCLEF_MCP_URL: http://host.docker.internal:25350/mcp
+      UNIONCLEF_MCP_TOKEN_FILE: /run/secrets/unionclef_mcp_token
+    secrets: [unionclef_mcp_token]
+    extra_hosts: ['host.docker.internal:host-gateway']
+secrets:
+  unionclef_mcp_token:
+    file: ${UNIONCLEF_MCP_TOKEN_PATH:?Set the full host path to the UnionClef token file}
