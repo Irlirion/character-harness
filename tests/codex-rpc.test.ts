@@ -18,3 +18,9 @@ test('Codex RPC handles server tool requests and turn notifications',async()=>{
   }finally{rpc.close();}
   await assert.rejects(rpc.request('after-close'),/codex_disconnected/);
 });
+
+
+test('Codex RPC accepts native image notifications larger than two megabytes',async()=>{
+ const rpc=new CodexRpc(process.execPath,process.cwd(),'/tmp/harness-codex-rpc-test',['--input-type=module','--eval',`import(${JSON.stringify(fixture)})`]);
+ try{await rpc.initialize();let length=0;rpc.onNotification=(method,p)=>{if(method==='item/completed')length=p.item.result.length;};assert.deepEqual(await rpc.request('large-image'),{ok:true});assert.equal(length,2_100_000);}finally{rpc.close();}
+});

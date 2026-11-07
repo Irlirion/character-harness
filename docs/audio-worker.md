@@ -90,23 +90,17 @@ node --experimental-strip-types scripts/speak.ts 'Привет! Лада на с
 
 Loopback Character Harness Voice должен быть включён с Pass-Thru, соединённым с выходами. Клиент SVC использует это устройство как микрофон, VOICE, disabled=false и muted=false. QuickTime больше не нужен: native helper выбирает CoreAudio device UID по точному уникальному имени и подаёт PCM прямо в устройство. Системный output не переключается. Не воспроизводить другие файлы QuickTime, пока он остаётся дополнительным источником этого Loopback устройства. Тестовый экземпляр не захватывает физический микрофон.
 
-## Постоянный запуск на этом Mac
+## Ручной запуск на этом Mac
 
 Живая установка находится в `/Users/irlirion/code/character-harness`.
-Qwen и audio worker запускаются пользовательскими LaunchAgent:
-`~/Library/LaunchAgents/org.characterharness.qwen-tts.plist` и
-`~/Library/LaunchAgents/org.characterharness.audio-worker.plist`.
-Оба используют `KeepAlive`, стартуют при входе пользователя. Qwen получает
-`HF_HUB_OFFLINE=1` и использует локальный кеш `work/qwen-tts/hf`; веса должны
-быть заранее скачаны. Worker автоматически перезапускается, если при старте
-модель ещё не готова. Не запускайте второй worker вручную одновременно с агентом.
+Qwen и audio worker запускаются только вручную через `make start`; остановка — `make stop`.
+Локальные задания лежат в `work/local-services/launchagents`, вне каталога автозагрузки macOS.
+`KeepAlive=false`, `RunAtLoad=false`: после выхода процесса или нового входа в систему повторного запуска нет.
+Qwen получает `HF_HUB_OFFLINE=1` и использует локальный кеш `work/qwen-tts/hf`;
+веса должны быть заранее скачаны. Запуск ждёт готовности TTS до старта worker.
+Не запускайте второй worker вручную одновременно с заданием.
 
-Перезапуск после обновления кода:
-
-```sh
-launchctl kickstart -k gui/$(id -u)/org.characterharness.qwen-tts
-launchctl kickstart -k gui/$(id -u)/org.characterharness.audio-worker
-```
+Подробности, смена порта ядра и перезапуск после обновления: [локальные сервисы](local-services.md).
 
 Логи сервиса: `work/qwen-tts/service.log` и `service.error.log`.
 Логи worker: `work/voice-spike/audio-worker.log` и `audio-worker.error.log`.

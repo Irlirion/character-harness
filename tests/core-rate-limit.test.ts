@@ -1,3 +1,4 @@
+import type { ImageStore } from '../packages/storage/images.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp, type CoreDeps } from '../apps/core/app.ts';
@@ -153,3 +154,34 @@ test('reply polling and public chat claims have explicit shared-token limits bef
     }finally{await h.app.close();}
   }
 });
+
+
+test('image polling and results share the engine budget and reject before database access',async()=>{
+ const h=harness();let calls=0;
+ const images={claim:async()=>{calls++;return null;},finish:async()=>{calls++;return {saved:true};},status:async()=>({jobs:[]})} as unknown as ImageStore;
+ const app=buildApp({principal,tokens,deps:h.deps,allowSystemChatPublicDemo:false,images});
+ const headers={authorization:`Bearer ${tokens.engine}`};
+ try{
+  assert.equal((await app.inject({method:'POST',url:'/engine/images/claim',headers:{authorization:`Bearer ${tokens.owner}`},payload:{}})).statusCode,401);
+  assert.equal(calls,0);
+  for(let i=0;i<299;i++){
+   const r=i%2?await app.inject({method:'POST',url:'/engine/images/claim',headers,payload:{}}):await app.inject({url:'/engine/status',headers});
+   assert.equal(r.statusCode,200);
+  }
+  const result=await app.inject({method:'POST',url:'/engine/images/11111111-1111-4111-8111-111111111111/result',headers,payload:{claim_id:'22222222-2222-4222-8222-222222222222',state:'unknown'}});
+  assert.equal(result.statusCode,200);
+  const before=calls;
+  assert.equal((await app.inject({method:'POST',url:'/engine/images/claim',headers:{...headers,'x-forwarded-for':'8.8.8.8'},payload:{}})).statusCode,429);
+  assert.equal(calls,before);
+  assert.equal((await app.inject({url:'/owner/images',headers:{authorization:`Bearer ${tokens.owner}`}})).statusCode,200);
+ }finally{await app.close();await h.app.close();}
+});
+
+ test('UnionClef mode exposes the queued navigation tool instead of key walking',async()=>{
+  const h=harness();const app=buildApp({principal,tokens,deps:h.deps,allowSystemChatPublicDemo:false,minecraftBackend:'unionclef'});
+  const client=new Client({name:'unionclef-catalog',version:'1'});
+  try{const base=await app.listen({host:'127.0.0.1',port:0});await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{fetch:coreFetch,requestInit:{headers:{Authorization:`Bearer ${tokens.engine}`}}}));
+   const names=(await client.listTools()).tools.map(t=>t.name);assert.ok(names.includes('agent_goto'));assert.ok(!names.includes('agent_walk'));assert.ok(!names.includes('ExecuteCommand'));
+   const denied=await client.callTool({name:'agent_goto',arguments:{x:0,y:64,z:0,invocation_id:'test',expected_epoch:1}});assert.equal(denied.isError,true);assert.match(JSON.stringify(denied),/client_world_disabled/);
+  }finally{await client.close();await app.close();await h.app.close();}
+ });

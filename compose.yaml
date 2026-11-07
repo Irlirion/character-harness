@@ -31,6 +31,8 @@ services:
       OWNER_TOKEN_FILE: /run/secrets/owner_token
       AUDIO_TOKEN_FILE: /run/secrets/audio_token
       BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
+      RUNTIME_STORAGE_ENABLED: ${RUNTIME_STORAGE_ENABLED:-false}
+      MINECRAFT_BACKEND: ${MINECRAFT_BACKEND:-unionclef}
       BRIDGE_CLIENT_WORLD_ENABLED: ${BRIDGE_CLIENT_WORLD_ENABLED:-false}
       CHARACTER_ID: ${CHARACTER_ID:-lada}
       CHARACTER_FILE: ${CHARACTER_FILE:-characters/Lada/personalities.yml}
@@ -38,7 +40,7 @@ services:
       BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO: ${BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO:-false}
     secrets: [database_url, engine_token, owner_token, audio_token, bridge_token]
     networks: [storage, agent]
-    ports: ['127.0.0.1:3000:3000']
+    ports: ['127.0.0.1:${CORE_PORT:-3000}:3000']
     depends_on:
       migrate: {condition: service_completed_successfully}
     init: true
@@ -58,6 +60,7 @@ services:
     profiles: [agent]
     environment:
       CORE_URL: http://core:3000
+      RUNTIME_ENGINE_ENABLED: ${RUNTIME_ENGINE_ENABLED:-false}
       ENGINE_TOKEN_FILE: /run/secrets/engine_token
       MODEL_API_KEY_FILE: /run/secrets/model_api_key
       PI_PROVIDER: ${PI_PROVIDER:-}
@@ -79,6 +82,7 @@ services:
     profiles: [codex]
     environment:
       CORE_URL: http://core:3000
+      RUNTIME_ENGINE_ENABLED: ${RUNTIME_ENGINE_ENABLED:-false}
       ENGINE_TOKEN_FILE: /run/secrets/engine_token
       HARNESS_CODEX_HOME: /data/codex
       CODEX_MODEL: ${CODEX_MODEL:-gpt-6-luna}

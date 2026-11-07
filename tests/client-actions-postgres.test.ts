@@ -19,7 +19,7 @@ test('PostgreSQL client actions enforce replay, leases, observation scope, and a
       import('../packages/storage/db.ts'), import('../packages/storage/actions.ts'), import('../packages/storage/observations.ts'),
     ]);
     storagePool = pool;
-    for (const version of ['001-core', '002-speech', '003-bridge-delivery', '004-bridge-author-provenance', '005-event-admission', '005-client-actions', '006-voice-stt-provenance']) {
+    for (const version of ['001-core', '002-speech', '003-bridge-delivery', '004-bridge-author-provenance', '005-event-admission', '005-client-actions', '006-voice-stt-provenance','020-unionclef-navigation']) {
       await storagePool.query(await readFile(new URL(`../migrations/${version}.sql`, import.meta.url), 'utf8'));
     }
     const p = { characterId: 'lada', audienceId: 'demo' };
@@ -103,6 +103,21 @@ test('PostgreSQL client actions enforce replay, leases, observation scope, and a
       await storagePool.query("UPDATE client_actions SET state='completed',finished_at=now() WHERE id=$1", [item.id]);
     }
     await assert.rejects(actions.enqueueClientAction(p, 'budget-overflow', 'walk', { forward: 1 }, 0, budgetEpoch), { code: 'client_action_turn_budget' });
+
+    await storagePool.query("UPDATE characters SET epoch=epoch+1,lease_until=now()+interval '2 minutes' WHERE id='lada'");
+    const navigationEpoch=(await storagePool.query("SELECT epoch FROM characters WHERE id='lada'")).rows[0].epoch;
+    await observe();
+    await assert.rejects(actions.enqueueClientAction(p,'no-unionclef','goto',{x:3,y:64,z:4},20000,navigationEpoch),{code:'unionclef_not_ready'});
+    await storagePool.query(`UPDATE world_observations SET snapshot=jsonb_set(snapshot,'{self,navigation_backend}','"unionclef_mcp"') WHERE character_id='lada'`);
+    await assert.rejects(actions.enqueueClientAction(p,'too-far','goto',{x:300,y:64,z:4},20000,navigationEpoch),{code:'invalid_navigation_target'});
+    const navigation=await actions.enqueueClientAction(p,'navigation','goto',{x:3,y:64,z:4},20000,navigationEpoch);
+    const navigationClaim=await actions.claimClientAction(p);assert.equal(navigationClaim?.kind,'goto');
+    assert.equal(await actions.claimClientAction(p),null,'in-flight navigation is not reissued');
+    assert.deepEqual(await actions.enqueueClientAction(p,'navigation','goto',{x:3,y:64,z:4},20000,navigationEpoch),{...navigation,state:'claimed'});
+    await assert.rejects(actions.enqueueClientAction(p,'navigation','goto',{x:4,y:64,z:4},20000,navigationEpoch),{code:'invocation_conflict'});
+    await storagePool.query("UPDATE characters SET epoch=epoch+1 WHERE id='lada'");
+    assert.equal((await actions.clientActionLease(p,navigation.id,navigationClaim!.claim_id!)).valid,false);
+    assert.deepEqual(await actions.finishClientAction(p,navigation.id,navigationClaim!.claim_id!,'completed',{}),{state:'cancelled'});
 
   } finally {
     await storagePool?.end();

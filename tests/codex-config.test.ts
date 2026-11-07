@@ -12,7 +12,7 @@ test('Codex enables dynamic tool dispatch while keeping other built-in features 
     await configureCodex(join(root,'home'),join(root,'workspace'));
     const config=await readFile(join(root,'home','config.toml'),'utf8');
     assert.match(config,/^code_mode_host = true$/m);
-    for(const feature of ['shell_tool','unified_exec','apps','computer_use','browser_use','multi_agent','view_image'])
+    for(const feature of ['shell_tool','unified_exec','apps','computer_use','browser_use','multi_agent','view_image','image_generation'])
       assert.match(config,new RegExp(`^${feature} = false$`,'m'));
   } finally { await rm(root,{recursive:true,force:true}); }
 });

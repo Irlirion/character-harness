@@ -23,10 +23,11 @@ final class ClientActionController {
     private static final double MAX_SUPPORT_DIAGNOSTIC_DEPTH=3.0;
     private static final double SUPPORT_EPSILON=1.0e-4;
     record Action(String id, String claimId, String kind, double forward, double strafe,
-                  double yawDegrees, double pitchDegrees, int durationMs, long expiresAtMs, String sessionId) {}
+                  double yawDegrees, double pitchDegrees, int durationMs, long expiresAtMs, String sessionId, int x,int y,int z) {}
 
     private final BiConsumer<Action, Result> completion;
     private final Predicate<String> currentSession;
+    private final UnionClefNavigation navigation;
     private volatile Action active;
     private long deadlineNanos;
     private Vec3d startPos;
@@ -43,7 +44,7 @@ final class ClientActionController {
 
     record Result(String state, JsonObject evidence) {}
 
-    ClientActionController(BiConsumer<Action, Result> completion,Predicate<String> currentSession) { this.completion = completion; this.currentSession=currentSession; }
+    ClientActionController(BiConsumer<Action, Result> completion,Predicate<String> currentSession,UnionClefNavigation navigation) { this.completion = completion; this.currentSession=currentSession;this.navigation=navigation; }
     Action active() { return active; }
 
     void start(MinecraftClient client, Action action) {
@@ -59,7 +60,7 @@ final class ClientActionController {
                 || client.options.leftKey.isPressed() || client.options.rightKey.isPressed()) {
             completion.accept(action, result("failed", "movement_input_busy")); return;
         }
-        if (!"walk".equals(action.kind()) && !"turn".equals(action.kind())) {
+        if (!"walk".equals(action.kind()) && !"turn".equals(action.kind())&&!"goto".equals(action.kind())) {
             completion.accept(action, result("failed", "unsupported_action")); return;
         }
         if ("walk".equals(action.kind()) && !ActionBounds.validWalk(action.forward(),action.strafe(),action.durationMs())) {
@@ -80,17 +81,26 @@ final class ClientActionController {
         if ("turn".equals(action.kind()) && !ActionBounds.validTurn(action.yawDegrees(),action.pitchDegrees())) {
             completion.accept(action, result("failed", "invalid_turn_bounds")); return;
         }
+        if("goto".equals(action.kind())){
+            if(navigation==null||!navigation.available()||!UnionClefGuard.ready()){completion.accept(action,result("failed","unionclef_not_ready"));return;}
+            if(action.durationMs()<1000||action.durationMs()>20000||client.player.squaredDistanceTo(action.x()+0.5,action.y(),action.z()+0.5)>32*32
+                ||!client.world.isChunkLoaded(new BlockPos(action.x(),action.y(),action.z()))){completion.accept(action,result("failed","invalid_navigation_target"));return;}
+        }
         active = action;
         startPos = new Vec3d(client.player.getX(),client.player.getY(),client.player.getZ());
         startYaw = net.minecraft.util.math.MathHelper.wrapDegrees(client.player.getYaw());
         startPitch = client.player.getPitch();
         targetYaw = startYaw;
         targetPitch = startPitch;
-        int boundedDuration = "turn".equals(action.kind()) ? 1200 : Math.max(100, Math.min(action.durationMs(), 1200));
+        int boundedDuration = "goto".equals(action.kind())?action.durationMs():"turn".equals(action.kind()) ? 1200 : Math.max(100, Math.min(action.durationMs(), 1200));
         deadlineNanos = System.nanoTime() + boundedDuration * 1_000_000L;
         lastLeaseNanos = System.nanoTime();
         turnSet = false;
         if ("walk".equals(action.kind())) setMovement(client, action);
+        if("goto".equals(action.kind())){
+            if(client.player.squaredDistanceTo(action.x()+0.5,action.y(),action.z()+0.5)<=4){finish(client,action,"completed",null);return;}
+            navigation.start(action.x(),action.y(),action.z());
+        }
     }
 
     void tick(MinecraftClient client) {
@@ -102,6 +112,17 @@ final class ClientActionController {
         if (client.currentScreen != null) { finish(client, action, "cancelled", "screen_opened"); return; }
         if (!currentSession.test(action.sessionId())) { finish(client,action,"cancelled","world_session_mismatch"); return; }
         if (System.nanoTime() - lastLeaseNanos > 500_000_000L) { finish(client, action, "cancelled", "action_lease_stale"); return; }
+        if("goto".equals(action.kind())){
+            if(!UnionClefGuard.ready()){finish(client,action,"cancelled","unionclef_not_ready");return;}
+            if(navigation.error()!=null){finish(client,action,"failed",navigation.error());return;}
+            if(navigation.started()&&navigation.arrived()&&client.player.squaredDistanceTo(action.x()+0.5,action.y(),action.z()+0.5)<=4){
+                finish(client,action,"completed",null);return;
+            }
+            if(System.nanoTime()>=deadlineNanos||System.currentTimeMillis()>=action.expiresAtMs()){
+                finish(client,action,"cancelled","navigation_timeout");return;
+            }
+            navigation.poll();return;
+        }
         StepCheck activeStep=null;
         if ("walk".equals(action.kind())) {
             if(client.player.getAbilities().flying){finish(client,action,"cancelled","player_flying");return;}
@@ -152,6 +173,7 @@ final class ClientActionController {
 
     private void finish(MinecraftClient client, Action action, String state, String reason, StepCheck step, boolean onGround) {
         if ("walk".equals(action.kind())) release(client);
+        if("goto".equals(action.kind())&&navigation!=null)navigation.stop();
         JsonObject evidence = new JsonObject();
         evidence.addProperty("kind", action.kind());
         if(step!=null)step.addEvidence(evidence,onGround);
