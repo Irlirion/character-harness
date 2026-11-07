@@ -124,7 +124,7 @@ app.get('/', async (_req, reply) => reply.type('text/html; charset=utf-8')
   .header('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:")
   .send(dashboardHtml));
 app.get('/engine/status', async () => status(principal));
-app.post('/engine/heartbeat',async req=>{
+app.post('/engine/heartbeat',{preHandler:app.rateLimit(),config:{rateLimit:{max:300,timeWindow:'1 minute',keyGenerator:()=> 'engine'}}},async req=>{
   const body=HeartbeatSchema.parse(req.body);
   if(!['codex-engine','pi-engine'].includes(body.component))throw new DomainError('heartbeat_component_denied');
   return pool.query(`INSERT INTO worker_heartbeats(character_id,component,state,error_code,heartbeat_at)
@@ -132,7 +132,7 @@ app.post('/engine/heartbeat',async req=>{
       state=excluded.state,error_code=excluded.error_code,heartbeat_at=excluded.heartbeat_at`,
     [principal.characterId,body.component,body.state,body.error_code??null]).then(()=>({saved:true}));
 });
-app.post('/audio/heartbeat',async req=>{
+app.post('/audio/heartbeat',{preHandler:app.rateLimit(),config:{rateLimit:{max:600,timeWindow:'1 minute',keyGenerator:()=> 'audio'}}},async req=>{
   const body=HeartbeatSchema.parse(req.body);
   if(!['audio-worker','tts-service'].includes(body.component))throw new DomainError('heartbeat_component_denied');
   return pool.query(`INSERT INTO worker_heartbeats(character_id,component,state,error_code,heartbeat_at)
