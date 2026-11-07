@@ -34,11 +34,17 @@ if (httpTts) {
 let stopped = false;
 let running: ChildProcess | undefined;
 let activeCancel: (() => void) | undefined;
+let workerState:'starting'|'ready'|'busy'|'degraded'|'stopping'='starting';
+let workerErrorCode:string|null=null;
+let heartbeatTimer:ReturnType<typeof setInterval>|undefined;
 
 type Job = { id: string; claim_id: string; text: string; expires_at: string };
 
 function stop() {
   stopped = true;
+  workerState='stopping';
+  void sendHeartbeats().catch(()=>{});
+  if(heartbeatTimer)clearInterval(heartbeatTimer);
   activeCancel?.();
   running?.kill('SIGTERM');
 }
@@ -56,6 +62,22 @@ async function api(path: string, body?: unknown) {
   });
   if (!r.ok) throw new Error('core_request_failed');
   return r.json();
+}
+
+async function ttsReady() {
+  if(!httpTts)return false;
+  try{
+    const response=await fetch(new URL('/ready',ttsUrl),{signal:AbortSignal.timeout(2500)});
+    await response.body?.cancel();
+    return response.ok;
+  }catch{return false;}
+}
+async function sendHeartbeats() {
+  const ready=await ttsReady();
+  await Promise.all([
+    api('/audio/heartbeat',{component:'audio-worker',state:workerState,error_code:workerErrorCode}),
+    api('/audio/heartbeat',{component:'tts-service',state:ready?'ready':'degraded',error_code:ready?null:'tts_unavailable'})
+  ]);
 }
 
 async function withJobFence<T>(
@@ -175,6 +197,10 @@ if (httpTts) {
   await ready.body?.cancel();
 }
 console.log(JSON.stringify({ event: 'audio_worker_ready', device, tts_provider: provider }));
+workerState='ready';
+await sendHeartbeats();
+heartbeatTimer=setInterval(()=>{void sendHeartbeats().catch(()=>{});},10000);
+heartbeatTimer.unref();
 
 while (!stopped) {
   let job: Job | undefined;
@@ -183,9 +209,11 @@ while (!stopped) {
     const claimed = await api('/audio/claim', {});
     job = claimed.job;
     if (!job) {
+      workerState='ready';workerErrorCode=null;
       await wait();
       continue;
     }
+    workerState='busy';workerErrorCode=null;void sendHeartbeats().catch(()=>{});
 
     dir = await mkdtemp('work/audio/speech-');
     const file = resolve(dir, 'speech.wav');
@@ -215,6 +243,7 @@ while (!stopped) {
     await api(`/audio/jobs/${job.id}`, { claim_id: job.claim_id, state: 'completed' });
     console.log(JSON.stringify({ event: 'speech_completed', speech_id: job.id }));
   } catch (e) {
+    workerState=stopped?'stopping':'degraded';workerErrorCode=stopped?null:'speech_job_failed';void sendHeartbeats().catch(()=>{});
     if (job) await api(`/audio/jobs/${job.id}`, { claim_id: job.claim_id, state: stopped ? 'cancelled' : 'failed' }).catch(() => {});
     console.error(JSON.stringify({ event: 'audio_attempt_failed', error_type: e instanceof Error ? e.message : 'unknown' }));
     if (!stopped) await wait();

@@ -44,7 +44,7 @@ test('review workflow routes require owner role and never expose an approval end
  const app=runtimeApp({runtimeEngine:{} as any,runtimePolicy:policy});
  try{
   const payload={request_id:randomUUID(),activity_id:randomUUID(),activity_version:1,policy_version:'test.v1',payload_hash:'a'.repeat(64)};
-  for(const token of [runtimeTokens.engine,runtimeTokens.audio,runtimeTokens.bridge]){
+  for(const token of [runtimeTokens.engine,runtimeTokens.audio,"b".repeat(64)]){
    const headers={authorization:`Bearer ${token}`};
    assert.equal((await app.inject({url:'/owner/runtime-reviews',headers})).statusCode,401);
    assert.equal((await app.inject({method:'POST',url:'/owner/runtime-reviews/retry',headers,payload})).statusCode,401);

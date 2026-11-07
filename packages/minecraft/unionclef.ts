@@ -1,4 +1,4 @@
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 
 const toolSchema=z.object({name:z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/),description:z.string().default(''),inputSchema:z.record(z.string(),z.unknown())});
@@ -15,6 +15,8 @@ export class UnionClefWorkspace {
  private generation=0;
  private stopping=false;
  private checking=false;
+ private observedSession?:string;
+ private cachedStatus?:{at:number;value:any};
  private timer?:ReturnType<typeof setInterval>;
  private options:WorkspaceOptions;
  constructor(options:WorkspaceOptions){
@@ -39,6 +41,39 @@ export class UnionClefWorkspace {
   if(initialized.serverInfo?.name!=='unionclef')throw new Error('unexpected_minecraft_server');
   return z.array(toolSchema).max(256).parse((await this.rpc('tools/list',{})).tools);
  }
+ private async readTool(name:string,args:Record<string,unknown>={}):Promise<any>{
+  const result=await this.rpc('tools/call',{name,arguments:args});
+  if(result.isError)throw new Error('unionclef_observation_failed');
+  const text=result.content?.find((item:any)=>item.type==='text')?.text;
+  if(typeof text!=='string'||text.length>16_384)throw new Error('unionclef_observation_invalid');
+  try{return JSON.parse(text);}catch{return {text:text.slice(0,4000)};}
+ }
+ /** Direct read-only MCP probe. UnionClef v0.95.63 does not expose server address or a reconnect/session id. */
+ async status(force=false):Promise<any>{
+  if(!force&&this.cachedStatus&&Date.now()-this.cachedStatus.at<4000)return this.cachedStatus.value;
+  try{
+   const [tools,game]=await Promise.all([this.catalog(),this.readTool('getGameState')]);
+   const inGame=game?.inGame===true;
+   if(!inGame)this.observedSession=undefined;
+   else if(!this.observedSession)this.observedSession=randomUUID();
+   const value={configured:true,connected:inGame,stale:false,state:inGame?'ready':'not_in_game',
+    tool_count:tools.length,session_id:this.observedSession??null,server_identity:'unavailable',
+    self:inGame&&game.self?{pos:typeof game.self.pos==='string'?game.self.pos.slice(0,100):null,dimension:typeof game.self.dimension==='string'?game.self.dimension.slice(0,80):null,hp:typeof game.self.hp==='number'?game.self.hp:null}:null,
+    player_count:inGame&&Number.isSafeInteger(game.playerCount)?Math.max(0,Math.min(game.playerCount,256)):null,
+    observed_at:new Date().toISOString()};
+   this.cachedStatus={at:Date.now(),value};return value;
+  }catch{
+   this.observedSession=undefined;
+   const value={configured:true,connected:false,stale:true,state:'unreachable',tool_count:null,session_id:null,server_identity:'unavailable',self:null,player_count:null,observed_at:new Date().toISOString(),error_code:'unionclef_unreachable'};
+   this.cachedStatus={at:Date.now(),value};return value;
+  }
+ }
+ async observe():Promise<any>{
+  const state=await this.status();
+  if(!state.connected)return state;
+  try{return {available:true,connected:true,stale:false,session_id:state.session_id,server_identity:'unavailable',snapshot:await this.readTool('getGameState'),observed_at:new Date().toISOString()};}
+  catch{return {available:true,connected:false,stale:true,session_id:null,error_code:'unionclef_observation_failed'};}
+ }
  /** Multiple independent engines share database receipts; uncertain calls are never resent. */
  async call(name:string,args:Record<string,unknown>,invocation:string,epoch:number,guard:()=>Promise<unknown>=async()=>{}):Promise<unknown>{
   if(this.busy||this.stopping)throw new Error('minecraft_busy');
@@ -48,6 +83,9 @@ export class UnionClefWorkspace {
    const access=await this.options.access();if(access.epoch!==epoch)throw new Error('minecraft_epoch_changed');
    const catalog=await this.catalog();const tool=catalog.find(t=>t.name===name);if(!tool)throw new Error('unknown_minecraft_tool');
    z.fromJSONSchema(tool.inputSchema).parse(args);
+   if(name==='ConnectToServer')throw new Error('server_switch_requires_reconnect');
+   if(name==='ExecuteCommand')throw new Error('arbitrary_commands_disabled');
+   if(name==='ChatMessage'&&typeof args.msg==='string'&&/^[\s]*[;@/]/.test(args.msg))throw new Error('minecraft_commands_disabled');
    const payload=JSON.stringify({name,args,epoch,session:access.session});
    const hash=createHash('sha256').update(payload).digest('hex');
    const inserted=await this.options.pool.query(`INSERT INTO minecraft_tool_receipts(character_id,invocation_id,request_hash,state) VALUES($1,$2,$3,'unknown') ON CONFLICT DO NOTHING RETURNING invocation_id`,[this.options.characterId,invocation,hash]);

@@ -1,6 +1,6 @@
 # Запуск в Docker
 
-Дата обновления: 2026-10-10. Статус: Docker core/PostgreSQL, Pi profile и Codex profile собираются на Node 24; Codex использует отдельный ChatGPT device login. На Mac вне Docker работают native Minecraft Fabric client, Qwen3-TTS на MLX и audio worker. Telegram и Docker-only Minecraft client не реализованы. TTS не входит в Compose: запуск модели требует Apple Silicon и нативного macOS MLX.
+Статус: core/PostgreSQL, Pi profile и Codex profile запускаются в Docker. На Mac отдельно работают Prism Minecraft client, UnionClef и нативные Qwen3-TTS/audio workers. Для UnionClef core использует `compose.unionclef.yaml` и отдельный MCP token-файл.
 
 ## Базовая топология
 
@@ -9,7 +9,7 @@
 - codex-engine: отдельный profile container, isolated Codex app-server login, ограниченные MCP tools и отдельный `codex_data` volume.
 - postgres: отдельный контейнер PostgreSQL 18 с постоянным volume.
 - migrate: одноразовый запуск того же образа приложения для миграций БД.
-- Minecraft: native Fabric client-only bridge в отдельном Prism test instance, отдельный bridge token, без server addon.
+- Minecraft: UnionClef MCP на локальном Prism client, без project-owned Fabric companion и без server addon.
 - Audio: native Node/Swift worker на Mac, Loopback и клиентский SVC.
 - TTS: native macOS Python/MLX service на `127.0.0.1:3081`; модель прогревается до readiness. Piper и отдельный TTS Docker image больше не входят в runtime.
 
@@ -60,6 +60,6 @@ PostgreSQL healthcheck предшествует migrate; core запускает
 
 ## Simple Voice Chat
 
-Server addon запрещён. Тестовый client bridge работает в установленном Fabric клиенте на Mac; native audio worker подаёт речь в Loopback, который использует локальный SVC клиент. Серверный voice endpoint уже проверялся без модификации server. [Спецификация](integrations/minecraft-voice.md).
+Minecraft voice/chat ingress и game voice output сейчас не подключены: UnionClef v0.95.63 не публикует эти события через MCP. Native audio worker/TTS могут работать отдельно, но не доставляют звук в Minecraft без соответствующего client API.
 
-Запуск и текущий статус: [development](development.md). Compose включает core, PostgreSQL, миграции, Pi profile и Codex profile; login через device flow выполнен отдельно. Live Fabric chat ждёт перезапуска test client. Полный Telegram/social MVP не готов.
+Запуск и текущий статус: [development](development.md). Для MCP Minecraft запускайте Compose с [UnionClef overlay](unionclef-migration.md). Полный Telegram/social MVP не готов.

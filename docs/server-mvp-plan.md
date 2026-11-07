@@ -33,7 +33,7 @@
 
 ### 3. Обязательный голос
 
-Изначально предлагались server addon и контейнерный TTS. Актуальная реализация использует client-only Fabric bridge, очередь коротких реплик, Qwen TTS нативно на Mac и Loopback/SVC; server addon не нужен. Подробности и инструкции приведены в [audio-worker](audio-worker.md) и [Minecraft voice](integrations/minecraft-voice.md).
+Ранее использовался client-only Fabric companion для SVC. Он удалён при переходе Minecraft control plane на UnionClef MCP. Текущая версия upstream не предоставляет chat/audio ingress и game voice output; TTS/audio worker остаётся отдельным host сервисом. Текущее подключение: [UnionClef MCP](unionclef-migration.md).
 
 Готовность: участник рядом слышит ответ; устаревшая/отменённая реплика не начинается; ошибка TTS не блокирует текстовый ответ и не вызывает дубли.
 
@@ -63,7 +63,7 @@ Codex-адаптер, произвольное самокодирование, �
 
 Предлагаемый модельный путь для подписки — официальный Codex app-server с отдельной авторизацией ChatGPT и ограниченным каталогом действий харнеса. Pi остаётся альтернативным engine; существующий Pi worker требует модельный API key и не является готовым subscription flow. Не монтировать весь пользовательский ~/.codex в контейнер: отдельное хранилище авторизации engine. Лимиты подписки остаются ограничением доступности.
 
-Предложение 2026-10-04 о Docker-only Minecraft client и headless/display setup не является текущим планом. Проверенный срез использует native Fabric client и audio worker на Mac, без server addon; детали приведены в [Minecraft voice](integrations/minecraft-voice.md).
+Предложение 2026-10-04 о Docker-only Minecraft client и headless/display setup не является текущим планом. Клиент запускается локально в Prism, а core соединяется с ним через authenticated UnionClef MCP; детали приведены в [UnionClef MCP](unionclef-migration.md).
 
 Историческое предложение 2026-10-04: Piper для TTS и faster-whisper multilingual small/int8 для STT на CPU в Docker. Piper не входит в текущий runtime; актуальный TTS — нативный Qwen3-TTS через MLX на Mac. STT по-прежнему не выбран. Требования к source UUID из SVC и защите от собственного эха относятся к будущему STT.
 
@@ -73,4 +73,4 @@ Codex-адаптер, произвольное самокодирование, �
 
 ## Текущий прогресс
 
-Codex отдельный login и закреплённая модель `gpt-6-luna` проверены. Один synthetic event прошёл engine turn, ответ и автоматическую speech очередь до `completed`. Fabric bridge установлен только в `character-harness-test`; следующий шаг — перезапуск тестового клиента и реальный обращённый игроком текст. Telegram, STT, движение и автономные обязанности остаются вне этого среза.
+Codex отдельный login и закреплённая модель `gpt-6-luna` проверены. Один synthetic event прошёл engine turn, ответ и speech очередь до `completed`. Minecraft runtime переключён на UnionClef MCP; live social/chat ingress и автоматическое пробуждение от игроков пока недоступны. Telegram и автономные обязанности остаются отдельными работами.

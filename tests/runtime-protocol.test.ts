@@ -43,7 +43,7 @@ test('runtime protocol checks engine role, scope, policy at each boundary and pr
   }});
   const headers={authorization:`Bearer ${runtimeTokens.engine}`};
   try{
-    for(const token of [undefined,runtimeTokens.owner,runtimeTokens.audio,runtimeTokens.bridge])assert.equal((await app.inject({method:'POST',url:'/engine/next_work',headers:token?{authorization:`Bearer ${token}`}:{},payload:{request_id:'x'}})).statusCode,401);
+    for(const token of [undefined,runtimeTokens.owner,runtimeTokens.audio,"b".repeat(64)])assert.equal((await app.inject({method:'POST',url:'/engine/next_work',headers:token?{authorization:`Bearer ${token}`}:{},payload:{request_id:'x'}})).statusCode,401);
     assert.equal(calls.length,0);
     for(const extra of [{audience_id:'private'},{character_id:'other'}])assert.equal((await app.inject({method:'POST',url:'/engine/next_work',headers,payload:{request_id:'x',...extra}})).statusCode,400);
     const claim=await app.inject({method:'POST',url:'/engine/next_work',headers,payload:{request_id:'x'}});

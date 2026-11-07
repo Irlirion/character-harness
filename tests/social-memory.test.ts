@@ -31,9 +31,8 @@ test('/engine/complete keeps legacy requests compatible and rejects malformed de
   const deps:CoreDeps={
     pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},status:unused,search:unused,remember:unused,control:unused,ingest:unused,
     nextEvent:unused,recentConversation:unused,complete:async(...args:any[])=>{calls.push(args);return {saved:true,memory:args[6]?{status:'rejected',reason:args[6]}:undefined};},
-    deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused, enqueueClientAction:async()=>({}),clientActionStatus:async()=>({}),clientActionLease:async()=>({}),claimClientAction:async()=>null,finishClientAction:async()=>({}),saveWorldObservation:async()=>({}),latestWorldObservation:async()=>null,cancelClientActions:async()=>({})
-  };
-  const app=buildApp({principal:{characterId:'lada',audienceId:'demo'},tokens,deps,allowSystemChatPublicDemo:false});
+    deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused, };
+  const app=buildApp({principal:{characterId:'lada',audienceId:'demo'},tokens,deps,});
   const event_id=randomUUID();
   try{
     const headers={authorization:`Bearer ${tokens.engine}`};
@@ -246,27 +245,6 @@ test('PostgreSQL completion commits reply with delta, rejects bad delta locally,
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM speech_jobs WHERE request_id=$1',['reply:'+chatEvent])).rows[0].n,0);
     assert.equal((await completeEvent(pool,p,chatEvent,'Привет в общий чат',5,false,undefined,undefined,undefined,'reply','chat')).replayed,true);
     await assert.rejects(completeEvent(pool,p,chatEvent,'Привет в общий чат',5,true,undefined,undefined,undefined,'reply','voice'),/completion_conflict/);
-    const unused=async()=>{throw new Error('unused');};
-    const app=buildApp({principal:p,tokens,allowSystemChatPublicDemo:false,deps:{pool:{query:(...args:any[])=> (pool.query as any)(...args),end:async()=>{}},status:unused,search:unused,remember:unused,control:unused,ingest:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,enqueueClientAction:unused,clientActionStatus:unused,clientActionLease:unused,claimClientAction:unused,finishClientAction:unused,saveWorldObservation:unused,latestWorldObservation:unused,cancelClientActions:unused}});
-    try {
-      const headers={authorization:`Bearer ${tokens.bridge}`};
-      const oldClient=await app.inject({method:'GET',url:'/bridge/replies',headers});
-      assert.equal(oldClient.statusCode,200);
-      assert.ok(!oldClient.json().some((row:any)=>row.id===chatEvent));
-      const newClient=await app.inject({method:'GET',url:'/bridge/replies?chat=true',headers});
-      assert.equal(newClient.statusCode,200);
-      assert.ok(newClient.json().some((row:any)=>row.id===chatEvent && row.channel==='chat'));
-      const claimChat=()=>app.inject({method:'POST',url:`/bridge/replies/${chatEvent}/claim-chat`,headers,payload:{}});
-      await pool.query("UPDATE characters SET paused=true WHERE id='lada'");
-      assert.equal((await claimChat()).json().claimed,false);
-      await pool.query("UPDATE characters SET paused=false,epoch=6 WHERE id='lada'");
-      assert.equal((await claimChat()).json().claimed,false);
-      await pool.query("UPDATE characters SET epoch=5 WHERE id='lada'");
-      assert.equal((await claimChat()).json().claimed,true);
-      assert.equal((await claimChat()).json().claimed,false);
-      const voiceClaim=await app.inject({method:'POST',url:`/bridge/replies/${eventSpeech}/claim-chat`,headers,payload:{}});
-      assert.equal(voiceClaim.json().claimed,false);
-    } finally {await app.close();}
     const commandEvent=randomUUID(); await source(commandEvent,'minecraft:command-test'); await claim(commandEvent);
     await assert.rejects(completeEvent(pool,p,commandEvent,'/op someone',5,false,undefined,undefined,undefined,'reply','chat'),/invalid_reply_channel/);
 

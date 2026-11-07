@@ -3,8 +3,6 @@
 services:
   core:
     environment:
-      MINECRAFT_BACKEND: unionclef
-      BRIDGE_CLIENT_WORLD_ENABLED: 'true'
       UNIONCLEF_MCP_URL: http://host.docker.internal:25350/mcp
       UNIONCLEF_MCP_TOKEN_FILE: /run/secrets/unionclef_mcp_token
     secrets: [unionclef_mcp_token]

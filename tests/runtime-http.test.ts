@@ -14,10 +14,10 @@ function harness(runtime?: RuntimeOwnerStore) {
     pool:{query:unused,end:unused},status:async()=>({paused:false}),search:unused,remember:unused,control:unused,
     ingest:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,
     enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,
-    enqueueClientAction:unused,clientActionStatus:unused,clientActionLease:unused,claimClientAction:unused,
-    finishClientAction:unused,saveWorldObservation:unused,latestWorldObservation:unused,cancelClientActions:unused,
+
+
   };
-  return buildApp({principal,tokens,deps,runtime,allowSystemChatPublicDemo:false});
+  return buildApp({principal,tokens,deps,runtime,});
 }
 
 test('storage flag defaults off, and strict schemas reject forged authority and malformed decisions',()=>{

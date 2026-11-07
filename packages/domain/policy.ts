@@ -15,18 +15,18 @@ export function matchesToken(header: unknown, token: string): boolean {
 export function canReadMemory(principal: Principal, memory: Memory): boolean {
   return principal.characterId === memory.characterId && principal.audienceId === memory.audienceId;
 }
-export type Role = 'owner' | 'audio' | 'bridge' | 'engine' | 'telegram';
+export type Role = 'owner' | 'audio' | 'engine' | 'telegram';
 /**
  * The request target may arrive in absolute-form, where the authority precedes the path.
- * Prefix matching the raw target would read "/owner/" out of "http://owner/bridge/events"
- * and hand the route to the wrong token, so resolve the path first.
+ * Prefix matching the raw target would mistake the authority for an API role,
+ * so resolve the path first.
  */
 export function requestPath(target: string): string {
   const absolute=/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/]*(\/.*)?$/.exec(target);
   const path=(absolute?absolute[1]:target.split('#')[0].split('?')[0])||'/';
   return path.startsWith('/')?path:`/${path}`;
 }
-const ROLE_PREFIX:readonly [string,Role][]=[['/owner/','owner'],['/audio/','audio'],['/bridge/','bridge'],['/engine/','engine'],['/telegram/','telegram']];
+const ROLE_PREFIX:readonly [string,Role][]=[['/owner/','owner'],['/audio/','audio'],['/engine/','engine'],['/telegram/','telegram']];
 /** Unknown paths resolve to null so an unmatched route is never authorized as the engine. */
 export function requiredRole(path: string): Role | null {
   for (const [prefix,role] of ROLE_PREFIX) if (path.startsWith(prefix)) return role;

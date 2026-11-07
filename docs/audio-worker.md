@@ -138,7 +138,7 @@ Smoke проверяет роли токенов, idempotency/conflict, один
 
 ## Граница проверки
 
-Путь owner speech → Qwen → Loopback → Simple Voice Chat подтверждён пользователем
-на слух. Эта проверка не подтверждает полный цикл от игрового сообщения через
-LLM до озвученного ответа. Инструкции других компонентов: [Fabric bridge](../client-bridge/README.md)
-и [локальный STT](superpowers/specs/2026-10-04-gigaam-v3-stt-service-design.md).
+Путь owner speech → Qwen → Loopback → Simple Voice Chat ранее проверялся
+пользователем на слух. Это отдельный аудио-путь: удалённый Minecraft companion
+больше не маршрутизирует речь в игру. Текущий UnionClef MCP не предоставляет voice
+ingress или game-audio output.
