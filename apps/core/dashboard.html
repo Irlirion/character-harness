@@ -11,6 +11,7 @@
     .connect{display:flex;gap:8px;align-items:center}.connect input{width:260px;max-width:42vw;background:#0e1628;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px 12px}.connect button{background:#b9d0ff;color:#0b1020;border:0;border-radius:10px;padding:11px 15px;font-weight:700;cursor:pointer}.meta{color:var(--muted);font-size:12px;margin:8px 0 20px}
     .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{background:linear-gradient(160deg,#172239,#111a2c);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0 0 12px}.value{font-size:19px;font-weight:700;overflow-wrap:anywhere}.small{font-size:13px;color:var(--muted);margin-top:5px;overflow-wrap:anywhere}.wide{grid-column:span 2}.full{grid-column:1/-1}.status{display:inline-flex;align-items:center;gap:8px}.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 12px currentColor}.ok .dot{background:var(--green);color:var(--green)}.warn .dot{background:var(--amber);color:var(--amber)}.bad .dot{background:var(--red);color:var(--red)}.unknown .dot{background:#74839d;color:#74839d}
     .activity{font-size:21px;line-height:1.35;font-weight:650}.event{white-space:pre-wrap;overflow-wrap:anywhere}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.chip{background:#0b1425;border:1px solid var(--line);border-radius:999px;color:#c2cee3;padding:4px 9px;font-size:12px}.notice{margin-top:18px;border-left:3px solid var(--amber);padding:10px 13px;background:#191b25;color:#c8d0df;font-size:13px}.error{color:var(--red)}.hidden{display:none!important}
+    .control{margin-top:13px;border:0;border-radius:9px;padding:10px 13px;font:inherit;font-size:13px;font-weight:700;cursor:pointer}.control.pause{background:#5b2634;color:#ffe3e8}.control.resume{background:#16553f;color:#ddffef}.control:disabled{opacity:.55;cursor:wait}.control-detail{min-height:1.4em}
     @media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}.top{display:block}.connect{margin-top:18px}}@media(max-width:560px){main{padding:22px 14px}.grid{grid-template-columns:1fr}.wide,.full{grid-column:auto}.connect input{width:100%;max-width:none}.connect{align-items:stretch}.connect button{flex:none}}
   </style>
 </head>
@@ -21,7 +22,7 @@
   </header>
   <div class="meta"><span id="connection">Токен хранится только до закрытия вкладки.</span><span id="updated"></span></div>
   <section class="grid">
-    <article class="card"><h2>Персонаж</h2><div class="value" id="character">—</div><div class="small" id="character-state">Ожидает подключения</div></article>
+    <article class="card"><h2>Персонаж</h2><div class="value" id="character">—</div><div class="small" id="character-state">Ожидает подключения</div><button class="control" id="character-toggle" type="button" disabled>Подключите панель</button><div class="small control-detail" id="control-detail">Управление доступно после подключения токена владельца.</div></article>
     <article class="card"><h2>Ядро и база</h2><div id="core" class="value">—</div><div class="small" id="core-detail">—</div></article>
     <article class="card"><h2>UnionClef MCP</h2><div id="minecraft" class="value">—</div><div class="small" id="minecraft-detail">—</div></article>
     <article class="card"><h2>Движок и голос</h2><div id="engine" class="value">—</div><div class="small" id="engine-detail">—</div></article>
@@ -36,7 +37,7 @@
 </main>
 <script>
 (() => {
-  const $=id=>document.getElementById(id); let token=sessionStorage.getItem('owner-token')||''; let timer;
+  const $=id=>document.getElementById(id); let token=sessionStorage.getItem('owner-token')||''; let timer; let paused=null; let controlBusy=false;
   $('token').value=token;
   const set=(id,value)=>$(id).textContent=value??'—';
   const stamp=v=>v?new Date(v).toLocaleString('ru-RU'):'время неизвестно';
@@ -44,10 +45,13 @@
   const state=(value)=>{const s=String(value||'unknown');const cls=['ok','connected','ready','active','true','configured','busy'].includes(s)?'ok':['stale','disconnected','paused','not_configured','not_observed','worker_heartbeat_unavailable','unknown','starting','stopping','not_in_game','unreachable'].includes(s)?'warn':['auth_required','error','failed','false','degraded'].includes(s)?'bad':'unknown';return `<span class="status ${cls}"><i class="dot"></i>${labels[s]||s}</span>`};
   const heartbeatDetail=w=>!w?.last_seen_at?'нет heartbeat':!w.fresh?`сигнал устарел · ${Math.round(w.age_ms/1000)} с назад`:`${labels[w.state]||w.state} · ${Math.round(w.age_ms/1000)} с назад${w.error_code?` · ${w.error_code}`:''}`;
   async function get(path){const r=await fetch(path,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'});if(!r.ok)throw new Error(r.status===401?'Токен владельца не принят':`Ошибка API: ${r.status}`);return r.json()}
+  async function post(path){const r=await fetch(path,{method:'POST',headers:{Authorization:`Bearer ${token}`},cache:'no-store'});if(!r.ok)throw new Error(r.status===401?'Токен владельца не принят':`Ошибка API: ${r.status}`);return r.json()}
+  function paintControl(value){paused=typeof value==='boolean'?value:null;const button=$('character-toggle');button.disabled=!token||paused===null||controlBusy;button.className=`control ${paused?'resume':'pause'}`;button.textContent=paused?'Возобновить персонажа':'Поставить на паузу';set('control-detail',paused?'Пауза блокирует новые ходы и сбрасывает активную задачу.':'Персонаж активен; пауза остановит новые ходы и сбросит активную задачу.')}
+  async function togglePause(){if(paused===null||controlBusy)return;const nextPaused=!paused;controlBusy=true;paintControl(paused);$('character-toggle').disabled=true;set('control-detail',nextPaused?'Ставлю персонажа на паузу…':'Возобновляю персонажа…');try{const result=await post(nextPaused?'/owner/pause':'/owner/resume');paused=typeof result.paused==='boolean'?result.paused:nextPaused;set('character-state',paused?`Пауза включена · epoch ${result.epoch??'—'}`:`Работает · epoch ${result.epoch??'—'}`);await refresh()}catch(err){set('control-detail',`Не удалось изменить состояние: ${err.message}`);$('control-detail').classList.add('error')}finally{controlBusy=false;const button=$('character-toggle');button.disabled=!token||paused===null;button.className=`control ${paused?'resume':'pause'}`;button.textContent=paused?'Возобновить персонажа':'Поставить на паузу'}}
   async function refresh(){if(!token)return;try{
     const [o,s,activityPage]=await Promise.all([get('/owner/overview'),get('/owner/status'),get('/owner/activities?limit=5&offset=0').catch(()=>null)]);
     set('connection','Подключено');set('updated',` · обновлено ${new Date(o.generated_at).toLocaleTimeString('ru-RU')}`);
-    set('character',o.character?.name||o.character?.id||'—');set('character-state',o.character?.paused?'Пауза включена':`Работает · epoch ${o.character?.epoch}`);
+    set('character',o.character?.name||o.character?.id||'—');set('character-state',o.character?.paused?'Пауза включена':`Работает · epoch ${o.character?.epoch}`);paintControl(o.character?.paused);
     $('core').innerHTML=state(o.signals?.core);set('core-detail',`PostgreSQL: ${o.signals?.database||'unknown'} · runtime ${s.runtime?.storage_enabled?'включён':'выключен'}`);
     $('minecraft').innerHTML=state(o.signals?.minecraft);set('minecraft-detail',o.world?.configured?`${o.world.tool_count??'—'} MCP-инструментов · ${o.world.self?.dimension||'мир не открыт'} · сервер и переподключение не подтверждаются`:'UnionClef MCP не настроен');
     $('engine').innerHTML=state(o.signals?.engine);set('engine-detail',`Engine: ${heartbeatDetail(o.workers?.engine)} · runtime protocol: ${s.runtime?.protocol_enabled?'включён':'выключен'}`);
@@ -64,8 +68,9 @@
     const tg=s.adapters?.telegram; const accounts=typeof tg==='object'?(tg.accounts||[]):[];const bindings=typeof tg==='object'?(tg.bindings||[]):[];const deliveries=typeof tg==='object'?(tg.deliveries||[]):[];
     $('telegram').innerHTML=state(accounts[0]?.status|| (accounts.length?'configured':'not_configured'));set('telegram-detail',`${bindings.length} привязок · ${deliveries.filter(x=>['pending','retry_wait'].includes(x.state)).length} доставок в очереди`);
     set('event',e?.text||'Нет события в обработке');const tags=$('event-tags');tags.replaceChildren();for(const x of e?[e.channel,e.created_at?stamp(e.created_at):null,e.processed?'завершено':'в работе'].filter(Boolean):[]){const span=document.createElement('span');span.className='chip';span.textContent=x;tags.append(span)}
-  }catch(err){set('connection',err.message);$('connection').className='error'} }
+  }catch(err){set('connection',err.message);$('connection').className='error';paused=null;$('character-toggle').disabled=true} }
   $('connect').addEventListener('submit',e=>{e.preventDefault();token=$('token').value.trim();sessionStorage.setItem('owner-token',token);$('connection').className='';refresh();clearInterval(timer);timer=setInterval(refresh,5000)});
+  $('character-toggle').addEventListener('click',togglePause);
   if(token){refresh();timer=setInterval(refresh,5000)}
 })();
 </script>
