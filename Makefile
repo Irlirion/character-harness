@@ -1,35 +1,26 @@
 SHELL := /bin/sh
+.DEFAULT_GOAL := help
 
 COMPOSE := docker compose
-GUI_DOMAIN := gui/$(shell id -u)
-LAUNCH_AGENTS := $(HOME)/Library/LaunchAgents
-QWEN_AGENT := $(LAUNCH_AGENTS)/org.characterharness.qwen-tts.plist
-AUDIO_AGENT := $(LAUNCH_AGENTS)/org.characterharness.audio-worker.plist
+BUILD_FLAGS ?= --build
+NATIVE_SERVICES := sh scripts/native-services.sh
 
-.PHONY: start stop status
+.PHONY: help start stop status
+
+help:
+	@echo "make start — start services manually; make stop — stop; make status — inspect"
 
 start:
-	@test -f "$(QWEN_AGENT)" || { echo "Missing $(QWEN_AGENT); install the Qwen LaunchAgent first." >&2; exit 1; }
-	@test -f "$(AUDIO_AGENT)" || { echo "Missing $(AUDIO_AGENT); install the audio worker LaunchAgent first." >&2; exit 1; }
-	$(COMPOSE) --profile stt up --build -d
-	@set -eu; \
-	for agent in "$(QWEN_AGENT)" "$(AUDIO_AGENT)"; do \
-		label=$$(/usr/libexec/PlistBuddy -c 'Print :Label' "$$agent"); \
-		if ! launchctl print "$(GUI_DOMAIN)/$$label" >/dev/null 2>&1; then \
-			launchctl bootstrap "$(GUI_DOMAIN)" "$$agent"; \
-		fi; \
-	done
+	$(NATIVE_SERVICES) check
+	$(COMPOSE) --profile stt up $(BUILD_FLAGS) -d
+	$(NATIVE_SERVICES) start
 
 stop:
-	@set -eu; \
-	for agent in "$(AUDIO_AGENT)" "$(QWEN_AGENT)"; do \
-		if test -f "$$agent"; then \
-			label=$$(/usr/libexec/PlistBuddy -c 'Print :Label' "$$agent"); \
-			launchctl bootout "$(GUI_DOMAIN)" "$$agent" 2>/dev/null || true; \
-		fi; \
-	done
-	$(COMPOSE) --profile agent --profile stt stop
+	@native_failed=0; compose_failed=0; \
+	$(NATIVE_SERVICES) stop || native_failed=1; \
+	$(COMPOSE) --profile agent --profile stt stop || compose_failed=1; \
+	test "$$native_failed" -eq 0 && test "$$compose_failed" -eq 0
 
 status:
 	$(COMPOSE) --profile agent --profile stt ps
-	@launchctl list | grep 'org\.characterharness\.' || true
+	$(NATIVE_SERVICES) status
