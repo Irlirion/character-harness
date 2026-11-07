@@ -139,6 +139,6 @@ Smoke проверяет роли токенов, idempotency/conflict, один
 ## Граница проверки
 
 Путь owner speech → Qwen → Loopback → Simple Voice Chat ранее проверялся
-пользователем на слух. Это отдельный аудио-путь: удалённый Minecraft companion
-больше не маршрутизирует речь в игру. Текущий UnionClef MCP не предоставляет voice
-ingress или game-audio output.
+пользователем на слух. Это отдельный аудио-путь от Fabric companion, который
+принимает inbound STT и не выполняет игровые действия. UnionClef MCP остаётся
+action backend; входящее распознавание предоставляют companion и локальный STT service.

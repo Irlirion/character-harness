@@ -30,11 +30,14 @@ services:
       ENGINE_TOKEN_FILE: /run/secrets/engine_token
       OWNER_TOKEN_FILE: /run/secrets/owner_token
       AUDIO_TOKEN_FILE: /run/secrets/audio_token
+      BRIDGE_TOKEN_FILE: /run/secrets/bridge_token
+      BRIDGE_CLIENT_WORLD_ENABLED: ${BRIDGE_CLIENT_WORLD_ENABLED:-false}
+      BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO: ${BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO:-false}
       RUNTIME_STORAGE_ENABLED: ${RUNTIME_STORAGE_ENABLED:-false}
       CHARACTER_ID: ${CHARACTER_ID:-lada}
       CHARACTER_FILE: ${CHARACTER_FILE:-characters/Lada/personalities.yml}
       AUDIENCE_ID: demo-public
-    secrets: [database_url, engine_token, owner_token, audio_token]
+    secrets: [database_url, engine_token, owner_token, audio_token, bridge_token]
     networks: [storage, agent]
     ports: ['127.0.0.1:${CORE_PORT:-3000}:3000']
     depends_on:
@@ -139,4 +142,5 @@ secrets:
   owner_token: {file: ./secrets/owner_token}
   model_api_key: {file: ./secrets/model_api_key}
   audio_token: {file: ./secrets/audio_token}
+  bridge_token: {file: ./secrets/bridge_token}
   stt_token: {file: ./secrets/stt_token}

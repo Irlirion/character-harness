@@ -1,40 +1,33 @@
 # Обзор текущего состояния Character Harness
 
-Дата: 2026-11-07. Typecheck прошёл; Docker core пересобран в режиме без тестов и запущен с UnionClef Compose overlay. Owner API подтвердил прямое MCP соединение.
+Дата: 2026-11-07. TypeScript typecheck прошёл; core и STT Docker images собраны без запуска тестов. Compose сообщает `core` и `stt` healthy. Тестовый Prism instance обновлён: новый Fabric companion и UnionClef установлены вместе. Сам Minecraft клиент после установки ещё нужно перезапустить и подключить к разрешённому серверу, чтобы появился живой сигнал bridge.
 
-## Результат миграции
+## Текущая схема
 
-- Custom Fabric companion, его игровые HTTP routes и отдельный bridge token удалены из runtime и исходников.
-- Core теперь получает панельное состояние и наблюдение мира read-only вызовами `tools/list` и `getGameState` через UnionClef MCP.
-- UnionClef MCP отвечает; core видит 60 инструментов и `getGameState` сообщает `ready`. Панель получает это напрямую.
-- Выбранный Prism instance обновлён: старый jar/config удалены в пользу UnionClef-only установки. Уже запущенный Minecraft процесс нужно перезапустить, чтобы он выгрузил ранее загруженный companion.
+- UnionClef MCP — единственный исполнитель игровых действий и источник каталога Minecraft-инструментов.
+- Fabric client companion не выполняет игровые действия. Он передаёт подписанный игровой чат, голосовые транскрипты и наблюдения о текущей серверной сессии.
+- Bridge chat/STT события проходят через отдельный токен, ограничение частоты, allowlist сервера, session ID, дедупликацию и проверки паузы/epoch. Системный чат не принимается.
+- STT service работает отдельно; его Docker health сейчас `healthy`. Companion опрашивает readiness и показывает её в owner dashboard.
+- В панели добавлена карточка чата/голоса. Она обновляется вместе с owner overview; после входа клиента показывает session observation, chat ingress и готовность SVC/STT.
+- Настройки тестового инстанса включают chat ingress, STT и observations. Bridge actions, системный чат и UnionClef режимы внутри companion выключены.
 
-## Известные upstream ограничения
+## Живое состояние и ограничения
 
-В закреплённой версии UnionClef v0.95.63 `getGameState` содержит состояние игрока и мира, но не адрес сервера или стабильный ID переподключения. MCP каталог также не предоставляет входящие chat/voice события с устойчивыми event IDs. Поэтому панель помечает server identity как недоступную; смена сервера из MCP заблокирована. Игровой chat ingress, STT и game voice output при удалении companion недоступны.
+Core и STT запущены и имеют healthy status. В Prism находятся UnionClef, companion и Simple Voice Chat. Пока клиент не перезапущен/не подключён к серверу, live bridge observation, входящий игровой чат и речь не подтверждены. Персонаж оставлен на паузе: события не запускают обработку до ручного resume владельцем.
 
-Изменяющие MCP-инструменты сейчас проверяют паузу/epoch и доступность игрового состояния, а повторы фиксируются durable receipt. Upstream не даёт достаточных данных для прежнего server/session fencing; его нельзя считать эквивалентно восстановленным. Для строгого fencing нужен upstream server identity + session generation API.
+Входящий voice path ограничен фразами с wake-name «Лада»; окружающая речь отбрасывается. Текст транскрипции не содержит регистра и пунктуации. Источник и аккаунт игрока считаются непроверенными. Системный чат выключен для избежания недоверенного server broadcast как пользовательского ввода.
 
-## Остальные работающие системы
+Outgoing TTS/audio worker уже умеет маршрутизировать звук через настроенный Loopback в Simple Voice Chat, но этот сеанс не доказывает автоматическую слышимость ответа после восстановления bridge. Нужен live тест с двумя участниками. Само состояние `healthy` сервиса не гарантирует, что звук услышан игроками.
 
-- Core, PostgreSQL, Pi/Codex engine и owner dashboard.
-- Scoped social memory и runtime activities с checkpoint/wakeup.
-- Telegram Bot API: личка/группа, approvals, delivery outbox.
-- Qwen TTS и native audio worker как отдельный host audio pipeline. Их heartbeat показывает доступность процессов, но не звук в Minecraft.
-- Dashboard обновляется каждые пять секунд, показывает worker heartbeats и прямой UnionClef MCP status после пересборки core.
+## Следующие шаги roadmap
 
-## Что мешает полной автономности
+1. Перезапустить `character-harness-test`, подключиться к `mc.agicraft.ru:25565` и убедиться, что карточка показывает connected session и `stt_ready`.
+2. Проверить входящий подписанный чат, ответ/доставку, reconnect и дедупликацию.
+3. Проверить голосовой wake-name → STT → ответ персонажа → Loopback/SVC у второго участника.
+4. Снять паузу только действием владельца, когда тестирование должно активировать персонажа.
+5. Усилить fencing для игровых действий, когда UnionClef предоставит проверяемый server/session ID.
+6. Продолжить roadmap по долгосрочным целям, отменяемым задачам, восстановлению, памяти и социальным метрикам.
 
-1. Нет событийного входа от игроков Minecraft; агент не просыпается на игровой чат.
-2. Нет аудио API для игрового SVC/STT и ответа голосом.
-3. Не хватает проверяемой server/session identity для строгого fencing действий.
-4. Не проверен end-to-end цикл: несколько игроков, длительные задачи, восстановление после disconnect и социальные метрики.
-5. Runtime workspace/self-improvement, review, rollout и rollback остаются roadmap работой.
+## Панель и проверка
 
-## Панель и развёртывание
-
-Панель читает только owner API и не показывает токены. Откройте `http://localhost:3000/`, введите `OWNER_TOKEN`; данные опрашиваются раз в пять секунд. Секрет UnionClef монтируется только в core через Compose secret. Engine, audio worker и TTS heartbeat сейчас `ready`; это не означает Minecraft voice output.
-
-Тесты в этой задаче не запускались. Для этой сборки прошёл `pnpm typecheck`; Dockerfile сохраняет тесты по умолчанию и допускает явный typecheck-only режим через `RUN_TESTS=0`.
-
-Подробные этапы: [roadmap](../roadmap.md).
+Owner dashboard находится на `http://localhost:3000/`, доступ — через `OWNER_TOKEN`; данные опрашиваются раз в пять секунд. Панель не раскрывает токены. Compose запущен с UnionClef overlay и STT profile. Тесты в этой задаче не запускались. `docs/roadmap.md` содержит оставшуюся работу.

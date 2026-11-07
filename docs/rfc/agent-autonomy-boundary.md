@@ -23,7 +23,7 @@ The harness **must not contain a global planner, assign the character intrinsic 
 
 ## 2. Motivation and current implementation
 
-Today `apps/engine/main.ts` and `apps/codex-engine/main.ts` poll `/engine/input` and normally invoke a model only when an event is present. Each event creates a short-lived session; turns have a 90-second deadline. A Minecraft turn ends via `turn_finish`; Telegram decisions are `reply` or `silence`. Tools are explicitly allowlisted per engine. Minecraft now connects through UnionClef MCP discovery/call/stop and direct `getGameState`; the retired Fabric companion and bounded walk/turn bridge routes are removed. UnionClef v0.95.63 does not report trusted server/session identity or chat/voice events, so these are explicit migration limits.
+Today `apps/engine/main.ts` and `apps/codex-engine/main.ts` poll `/engine/input` and normally invoke a model only when an event is present. Each event creates a short-lived session; turns have a 90-second deadline. A Minecraft turn ends via `turn_finish`; Telegram decisions are `reply` or `silence`. Tools are explicitly allowlisted per engine. UnionClef MCP handles Minecraft action discovery/call/stop and direct `getGameState`; a constrained Fabric client companion handles signed chat ingress, voice STT and session observations only. UnionClef v0.95.63 does not report trusted server/session identity for MCP actions, so strict action fencing remains a migration limit.
 
 The existing `docs/persistent-agents.md` proposes responsibilities, wakeups and a scheduler; `docs/capability-workshop.md` proposes skill lifecycle. They are **proposals, not a complete shipped autonomous runtime**. This RFC turns those concepts into a platform boundary without turning core into a personality-level supervisor.
 
@@ -195,7 +195,7 @@ Separate raw event log from agent-curated memories: episodic, semantic, social, 
 - Dynamic tools presented to Pi/Codex only after authorization and scoped to that agent/turn.
 - Check authorization **on every call**. Deny tools that bypass policy through generic command execution unless parsed and controlled.
 
-UnionClef's full catalog is available through MCP, with tool descriptions treated as untrusted data. Block server switching until server identity is observable. Reintroducing chat/voice or stricter action fencing requires upstream capabilities; do not emulate server/session identity from chat text.
+UnionClef's full catalog is available through MCP, with tool descriptions treated as untrusted data. Block server switching until server identity is observable. Inbound companion events require an allowlisted server and explicit session ID; they do not establish trusted server identity for MCP actions. Do not emulate identity from chat text.
 
 ### 7.4 Skill Runtime
 
@@ -265,7 +265,7 @@ Because optimization can influence behavior indirectly, require:
 | `packages/storage/db.ts` + migrations | Activities, wakeups, checkpoints, operation journal, workspace metadata |
 | `packages/storage/actions.ts` | Migrate Minecraft client actions to generic durable Operation abstraction without discarding safety semantics |
 | `characters/*` | Stable initial identity + private agent workspace; do not make YAML itself a mutable authority document |
-| UnionClef MCP | Add trusted server/session identity and stable inbound chat/voice event IDs upstream; restore automatic Minecraft wakeups only after that contract exists |
+| UnionClef MCP + Fabric companion | Add trusted server/session identity for MCP actions upstream; keep the restricted companion as inbound chat/STT and observation transport |
 | `docs/persistent-agents.md` | Align with activity/wakeup contracts; distinguish planned vs shipped |
 | `docs/capability-workshop.md` | Promote to bounded Skill Runtime implementation plan |
 

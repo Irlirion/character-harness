@@ -5,7 +5,8 @@ COPY apps/stt-service/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir "$(grep -m1 '^numpy==' /tmp/requirements.txt)"
 COPY apps/stt-service/main.py /app/main.py
 COPY apps/stt-service/test_main.py /app/test_main.py
-RUN python /app/test_main.py
+ARG RUN_TESTS=1
+RUN if [ "$RUN_TESTS" = "1" ]; then python /app/test_main.py; else echo "Skipping tests by build argument"; fi
 
 FROM python:3.14-slim-bookworm AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \

@@ -5,7 +5,7 @@ import type {CoreDeps} from '../apps/core/app.ts';
 import type {UnionClefWorkspace} from '../packages/minecraft/unionclef.ts';
 import type {TelegramStore} from '../packages/storage/telegram.ts';
 
-const tokens={engine:'e'.repeat(40),owner:'o'.repeat(40),audio:'a'.repeat(40)};
+const tokens={engine:'e'.repeat(40),owner:'o'.repeat(40),audio:'a'.repeat(40),bridge:'b'.repeat(40)};
 const eventId='11111111-1111-4111-8111-111111111111';
 function harness(channel:'minecraft'|'telegram',owner=false){
  let revoked=false;const dispatched:unknown[]=[];

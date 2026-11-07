@@ -13,11 +13,13 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import type { Principal } from '../../packages/domain/policy.ts';
 import { DomainError, matchesToken, requestPath, requiredRole } from '../../packages/domain/policy.ts';
+import { BridgeEventScopeError, parseBridgeEvent, SYSTEM_CHAT_SERVER } from '../../packages/domain/bridge-event.ts';
+import { isObservationTimeCurrent, worldObservationSchema } from '../../packages/domain/world-observation.ts';
 import { SocialMemoryDeltaSchema } from '../../packages/domain/social-memory.ts';
 import { SocialMemoryProposalSchema } from '../../packages/domain/social-memory.ts';
 import { boundSocialContext, makeTurnInput, type SocialContextInput } from '../../packages/domain/conversation-context.ts';
 
-export type CoreTokens = { engine: string; owner: string; audio: string; telegram?:string };
+export type CoreTokens = { engine: string; owner: string; audio: string; bridge: string; telegram?:string };
 export type CoreDeps = {
   pool: { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number | null }>; end: () => Promise<void> };
   status: (p: Principal) => Promise<any>;
@@ -38,6 +40,8 @@ export type CoreDeps = {
   claimSpeech: (p: Principal) => Promise<any>;
   speechState: (p: Principal, id: string) => Promise<any>;
   updateSpeech: (p: Principal, id: string, claimId: string, state: 'playing' | 'completed' | 'failed' | 'cancelled') => Promise<any>;
+  saveWorldObservation?: (p:Principal, observation:any) => Promise<any>;
+  latestWorldObservation?: (p:Principal) => Promise<any>;
 };
 export type BuildAppOptions = {
   principal: Principal;
@@ -51,6 +55,8 @@ export type BuildAppOptions = {
   images?:ImageStore;
   memoryInstructions?: string;
   responseInstructions?: string;
+  allowClientWorld?: boolean;
+  allowSystemChatPublicDemo?: boolean;
 };
 
 function emptySocialContext(): SocialContextInput {
@@ -58,7 +64,7 @@ function emptySocialContext(): SocialContextInput {
 }
 
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
-export function buildApp({ principal, tokens, minecraft, deps, memoryInstructions = '', responseInstructions = '', telegram, images, runtime, runtimeEngine, runtimePolicy }: BuildAppOptions): FastifyInstance {
+export function buildApp({ principal, tokens, minecraft, deps, memoryInstructions = '', responseInstructions = '', telegram, images, runtime, runtimeEngine, runtimePolicy, allowClientWorld = false, allowSystemChatPublicDemo = false }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 const dashboardHtml = readFileSync(new URL('./dashboard.html', import.meta.url), 'utf8');
 const HeartbeatSchema=z.object({component:z.enum(['codex-engine','pi-engine','audio-worker','tts-service']),state:z.enum(['starting','ready','busy','degraded','stopping']),error_code:z.string().regex(/^[a-z0-9_]{1,80}$/).nullable().optional()}).strict();
@@ -66,7 +72,7 @@ const HeartbeatSchema=z.object({component:z.enum(['codex-engine','pi-engine','au
 // Audio workers poll frequently; engine and owner requests use separate budgets.
 function rateBudget(path: string) {
   const role = requiredRole(path) ?? 'owner';
-  return { key: role, max: { audio: 600, engine: 300, owner: 120, telegram:600 }[role] };
+  return { key: role, max: { audio: 600, engine: 300, bridge:900, owner: 120, telegram:600 }[role] };
 }
 app.register(rateLimit, {
   hook: 'preHandler', timeWindow: '1 minute',
@@ -75,11 +81,17 @@ app.register(rateLimit, {
 });
 // Install routes after the plugin's onRoute hook is ready.
 app.after(() => {
-const { engine: engineToken, owner: ownerToken, audio: audioToken } = tokens;
+const { engine: engineToken, owner: ownerToken, audio: audioToken, bridge: bridgeToken } = tokens;
 const { pool, status, search, remember, control, ingest, nextEvent, recentConversation, complete, deferEvent,
   enqueueSpeech, claimSpeech, speechState, updateSpeech } = deps;
 app.addHook('onSend',async(req,reply,payload)=>{if(req.url.startsWith('/owner/overview'))reply.header('Cache-Control','no-store');return payload;});
-const currentWorldObservation=()=>minecraft?minecraft.observe():Promise.resolve({available:false,connected:false,stale:true,state:'not_configured'});
+const currentWorldObservation=async()=>{
+  const [workspace,client]=await Promise.all([
+    minecraft?minecraft.observe():Promise.resolve({available:false,connected:false,stale:true,state:'not_configured'}),
+    deps.latestWorldObservation?deps.latestWorldObservation(principal):Promise.resolve({available:false,connected:false,stale:true})
+  ]);
+  return {...workspace,client_observation:{available:client.available,connected:client.connected,stale:client.stale,server:client.server??null,session_id:client.session_id??null,age_ms:client.age_ms??null,snapshot:client.snapshot??null}};
+};
 app.addHook('onRequest', async (req, reply) => {
   const path = requestPath(req.url);
   if (path === '/health') return;
@@ -92,7 +104,7 @@ app.addHook('onRequest', async (req, reply) => {
   // Derive the required token from the resolved path, never from the raw request target:
   // an unmatched path has no role and must not fall back to the engine token.
   const role = requiredRole(path);
-  const required = role === 'owner' ? ownerToken : role === 'audio' ? audioToken : role === 'engine' ? engineToken : role === 'telegram' ? tokens.telegram??null : null;
+  const required = role === 'owner' ? ownerToken : role === 'audio' ? audioToken : role === 'bridge' ? bridgeToken : role === 'engine' ? engineToken : role === 'telegram' ? tokens.telegram??null : null;
   if (required === null || !matchesToken(req.headers.authorization, required)) return reply.code(401).send({ error: 'unauthorized' });
 });
 app.setErrorHandler((error, _req, reply) => {
@@ -132,6 +144,55 @@ app.post('/engine/heartbeat',{preHandler:app.rateLimit(),config:{rateLimit:{max:
       state=excluded.state,error_code=excluded.error_code,heartbeat_at=excluded.heartbeat_at`,
     [principal.characterId,body.component,body.state,body.error_code??null]).then(()=>({saved:true}));
 });
+app.post('/bridge/events',{preHandler:app.rateLimit(),config:{rateLimit:{max:180,timeWindow:'1 minute',keyGenerator:()=> 'bridge-events'}}},async(req,reply)=>{
+  let event;
+  try{event=parseBridgeEvent(req.body,allowSystemChatPublicDemo,principal.audienceId)}
+  catch(error){if(error instanceof BridgeEventScopeError)return reply.code(403).send({error:error.message});throw error;}
+  return ingest(principal,event);
+});
+app.post('/bridge/observation',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'bridge-observation'}}},async req=>{
+  if(!allowClientWorld||!deps.saveWorldObservation)throw new DomainError('client_world_disabled');
+  const observation=worldObservationSchema.parse(req.body);
+  if(JSON.stringify(observation).length>16_384)throw new DomainError('observation_too_large');
+  if(!isObservationTimeCurrent(observation.observed_at))throw new DomainError('observation_time_outside_window');
+  return deps.saveWorldObservation(principal,observation);
+});
+app.get('/bridge/replies',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'bridge-replies'}}},async req=>{
+  const query=z.object({chat:z.literal('true').optional(),session_id:z.string().uuid(),server:z.literal(SYSTEM_CHAT_SERVER)}).strict().parse(req.query);
+  return (await pool.query(`SELECT e.id,e.author_id,r.text,r.channel
+    FROM social_events e JOIN replies r ON r.event_id=e.id
+    WHERE e.character_id=$1 AND e.audience_id=$2
+      AND e.author_provenance IN ('fabric_profile_context','minecraft_system_chat','minecraft_voice_stt')
+      AND e.author_metadata->>'bridge_session_id'=$3 AND e.author_metadata->>'source_server'=$4
+      AND NOT e.reply_delivered
+      AND (r.channel<>'chat' OR ($5::boolean AND r.created_at>now()-interval '60 seconds'
+        AND EXISTS(SELECT 1 FROM characters c WHERE c.id=e.character_id AND NOT c.paused AND c.epoch=r.epoch)))
+    ORDER BY e.created_at,e.id LIMIT 20`,[principal.characterId,principal.audienceId,query.session_id,query.server,query.chat==='true'])).rows;
+});
+app.post('/bridge/replies/:id/claim-chat',{preHandler:app.rateLimit(),config:{rateLimit:{max:60,timeWindow:'1 minute',keyGenerator:()=> 'bridge-chat-claims'}}},async req=>{
+  const id=z.string().uuid().parse((req.params as {id:string}).id);
+  const body=z.object({session_id:z.string().uuid(),server:z.literal(SYSTEM_CHAT_SERVER)}).strict().parse(req.body);
+  const result=await pool.query(`UPDATE social_events e SET reply_delivered=true
+    WHERE e.id=$1 AND e.character_id=$2 AND e.audience_id=$3 AND e.processed AND NOT e.reply_delivered
+      AND e.author_provenance IN ('fabric_profile_context','minecraft_system_chat','minecraft_voice_stt')
+      AND e.author_metadata->>'bridge_session_id'=$4 AND e.author_metadata->>'source_server'=$5
+      AND EXISTS(SELECT 1 FROM replies r JOIN characters c ON c.id=e.character_id
+        WHERE r.event_id=e.id AND r.channel='chat' AND r.created_at>now()-interval '60 seconds' AND NOT c.paused AND c.epoch=r.epoch)
+      AND EXISTS(SELECT 1 FROM characters c WHERE c.id=e.character_id AND NOT c.paused)
+    RETURNING e.id`,[id,principal.characterId,principal.audienceId,body.session_id,body.server]);
+  return {claimed:result.rowCount===1};
+});
+app.post('/bridge/replies/:id/ack',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'bridge-reply-acks'}}},async req=>{
+  const id=z.string().uuid().parse((req.params as {id:string}).id);
+  const body=z.object({session_id:z.string().uuid(),server:z.literal(SYSTEM_CHAT_SERVER)}).strict().parse(req.body);
+  const result=await pool.query(`UPDATE social_events SET reply_delivered=true
+    WHERE id=$1 AND character_id=$2 AND audience_id=$3 AND processed
+      AND author_provenance IN ('fabric_profile_context','minecraft_system_chat','minecraft_voice_stt')
+      AND author_metadata->>'bridge_session_id'=$4 AND author_metadata->>'source_server'=$5
+      AND EXISTS(SELECT 1 FROM replies WHERE event_id=$1)`,[id,principal.characterId,principal.audienceId,body.session_id,body.server]);
+  if(!result.rowCount)throw new DomainError('reply_not_found');
+  return {acknowledged:true};
+});
 app.post('/audio/heartbeat',{preHandler:app.rateLimit(),config:{rateLimit:{max:600,timeWindow:'1 minute',keyGenerator:()=> 'audio'}}},async req=>{
   const body=HeartbeatSchema.parse(req.body);
   if(!['audio-worker','tts-service'].includes(body.component))throw new DomainError('heartbeat_component_denied');
@@ -141,9 +202,9 @@ app.post('/audio/heartbeat',{preHandler:app.rateLimit(),config:{rateLimit:{max:6
     [principal.characterId,body.component,body.state,body.error_code??null]).then(()=>({saved:true}));
 });
 // The global handler runs first to retain the shared role budget; route config also exposes the limit to static analysis.
-app.get('/owner/status', {preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}}, async () => ({ character: await status(principal), audience: principal.audienceId, runtime: { storage_enabled: !!runtime, protocol_enabled: !!runtimeEngine, autonomous_execution: runtimePolicy?.executionEnabled?await runtimePolicy.executionEnabled(principal):false, policy_gate: runtimePolicy?'installed':'unavailable' }, adapters: { minecraft: minecraft ? await minecraft.status() : {state:'not_configured'}, telegram: telegram?await telegram.overview():'not_configured', voice: 'native_audio_worker_status_unavailable' } }));
+app.get('/owner/status', {preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}}, async () => ({ character: await status(principal), audience: principal.audienceId, runtime: { storage_enabled: !!runtime, protocol_enabled: !!runtimeEngine, autonomous_execution: runtimePolicy?.executionEnabled?await runtimePolicy.executionEnabled(principal):false, policy_gate: runtimePolicy?'installed':'unavailable' }, adapters: { minecraft: minecraft ? await minecraft.status() : {state:'not_configured'}, game_bridge:deps.latestWorldObservation?await deps.latestWorldObservation(principal):{available:false,state:'not_observed'}, telegram: telegram?await telegram.overview():'not_configured', voice: 'native_audio_worker_status_unavailable' } }));
 app.get('/owner/overview', {preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}}, async () => {
-  const [character, world, queue, event, activeActivity, heartbeats] = await Promise.all([
+  const [character, world, queue, event, activeActivity, heartbeats, bridge] = await Promise.all([
     pool.query(`SELECT id,name,paused,epoch,active_event_id,active_runtime_turn_id,lease_until FROM characters WHERE id=$1`, [principal.characterId]),
     minecraft?minecraft.status():Promise.resolve({configured:false,connected:false,stale:true,state:'not_configured',tool_count:null,self:null,player_count:null}),
     pool.query(`SELECT count(*) FILTER (WHERE NOT processed)::int AS pending_events,
@@ -154,7 +215,8 @@ app.get('/owner/overview', {preHandler:app.rateLimit(),config:{rateLimit:{max:12
       JOIN runtime_activities a ON a.id=t.activity_id WHERE c.id=$1`, [principal.characterId]),
     pool.query(`SELECT component,state,error_code,heartbeat_at,
       (extract(epoch FROM clock_timestamp()-heartbeat_at)*1000)::int AS age_ms FROM worker_heartbeats
-      WHERE character_id=$1 ORDER BY heartbeat_at DESC`,[principal.characterId])
+      WHERE character_id=$1 ORDER BY heartbeat_at DESC`,[principal.characterId]),
+    deps.latestWorldObservation?deps.latestWorldObservation(principal):Promise.resolve({available:false,stale:true,connected:false,state:'not_observed'})
   ]);
   const latestWorld = world;
   const c=character.rows[0];
@@ -173,9 +235,10 @@ app.get('/owner/overview', {preHandler:app.rateLimit(),config:{rateLimit:{max:12
     audioHeartbeat.state==='busy'?'busy':
     audioHeartbeat.state==='ready'&&ttsHeartbeat.state==='ready'?'ready':
     audioHeartbeat.state==='starting'||ttsHeartbeat.state==='starting'?'starting':'not_observed';
+  const bridgeState=!bridge.available?'not_observed':bridge.stale?'stale':bridge.connected?'connected':'disconnected';
   return {generated_at:new Date().toISOString(),character:c?{id:c.id,name:c.name,paused:c.paused,epoch:c.epoch,lease_until:c.lease_until,active_event: event.rows[0]??null,active_activity:activeActivity.rows[0]??null}:null,
-    world:latestWorld,queue:queue.rows[0]??{pending_events:0,processed_events:0},workers:{engine:engineHeartbeat,audio:audioHeartbeat,tts:ttsHeartbeat},
-    signals:{core:'ok',database:'ok',minecraft:!latestWorld.configured?'not_configured':latestWorld.stale?'stale':latestWorld.connected?'connected':'disconnected',voice:voiceState,engine:engineHeartbeat.state}};
+    world:latestWorld,bridge,queue:queue.rows[0]??{pending_events:0,processed_events:0},workers:{engine:engineHeartbeat,audio:audioHeartbeat,tts:ttsHeartbeat},
+    signals:{core:'ok',database:'ok',minecraft:!latestWorld.configured?'not_configured':latestWorld.stale?'stale':latestWorld.connected?'connected':'disconnected',bridge:bridgeState,voice:voiceState,engine:engineHeartbeat.state}};
 });
 app.get('/owner/inspect-context', async req => {
   if (!deps.inspectEvent) throw new DomainError('context_inspection_unavailable');

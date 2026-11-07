@@ -1,5 +1,5 @@
 import { buildApp, type BuildAppOptions, type CoreDeps } from '../../apps/core/app.ts';
-export const runtimeTokens={owner:'o'.repeat(64),engine:'e'.repeat(64),audio:'a'.repeat(64)};
+export const runtimeTokens={owner:'o'.repeat(64),engine:'e'.repeat(64),audio:'a'.repeat(64),bridge:'b'.repeat(64)};
 export const runtimePrincipal={characterId:'lada',audienceId:'demo'};
 const unused=async()=>{throw new Error('unexpected_dependency');};
 export function runtimeApp(options:Pick<BuildAppOptions,'runtime'|'runtimeEngine'|'runtimePolicy'>,overrides:Partial<CoreDeps>={}) {

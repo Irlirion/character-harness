@@ -60,6 +60,6 @@ PostgreSQL healthcheck предшествует migrate; core запускает
 
 ## Simple Voice Chat
 
-Minecraft voice/chat ingress и game voice output сейчас не подключены: UnionClef v0.95.63 не публикует эти события через MCP. Native audio worker/TTS могут работать отдельно, но не доставляют звук в Minecraft без соответствующего client API.
+Minecraft chat ingress и voice STT передаются отдельным Fabric client companion; UnionClef MCP остаётся единственным исполнителем игровых действий. В Compose используйте bridge token и STT profile. Game voice output идёт через native audio worker, Loopback и Simple Voice Chat. Healthy контейнеры не доказывают, что клиент подключён или игрок услышал звук; это отображается отдельно в панели и требует live-проверки.
 
 Запуск и текущий статус: [development](development.md). Для MCP Minecraft запускайте Compose с [UnionClef overlay](unionclef-migration.md). Полный Telegram/social MVP не готов.

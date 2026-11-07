@@ -2,7 +2,7 @@
 
 Харнес для автономных персонажей, которые действуют в Minecraft, Telegram и других средах, сохраняют память и расширяют свои возможности.
 
-Последний аудит состояния кода: 2026-11-07 — [обзор проекта](docs/reviews/current-state-review.md). Minecraft подключается напрямую к UnionClef MCP; custom Fabric companion удалён. Полный живой социальный цикл не подтверждён: UnionClef пока не отдаёт входящие игровые chat/voice события, адрес сервера и ID переподключения. Локальная read-only веб-панель владельца открывается на `http://localhost:3000/`; для входа нужен `OWNER_TOKEN`.
+Последний аудит состояния кода: 2026-11-07 — [обзор проекта](docs/reviews/current-state-review.md). Minecraft использует гибридную схему: UnionClef MCP выполняет игровые действия, Fabric client companion передаёт чат, голосовые транскрипты и сведения о сессии. Companion не выполняет игровые действия. Локальная веб-панель владельца открывается на `http://localhost:3000/`; для входа нужен `OWNER_TOKEN`.
 
 Главная цель MVP — социальный вау-эффект для участников Minecraft-сервера и Telegram: узнаваемый персонаж с памятью, характером и уместной инициативой.
 
@@ -33,6 +33,8 @@ Telegram Bot API MVP: личка, одна группа с выбором reply/
 - [Стек первой версии](docs/technology-stack.md)
 - [Автоматический голос через Loopback](docs/audio-worker.md)
 - [UnionClef Minecraft MCP](docs/unionclef-migration.md)
+- [Входящий Minecraft чат и голос](docs/integrations/minecraft-voice.md)
+- [Текущий Fabric companion](client-bridge/README.md)
 - [Интеграция Telegram](docs/integrations/telegram.md)
 - [Движки Pi Agent и Codex](docs/engines.md)
 - [Codex runtime и вход через подписку](docs/codex-engine.md)

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {buildApp,type CoreDeps} from '../apps/core/app.ts';
 import type {UnionClefWorkspace} from '../packages/minecraft/unionclef.ts';
 
-const tokens={engine:'e'.repeat(64),owner:'o'.repeat(64),audio:'a'.repeat(64)};
+const tokens={engine:'e'.repeat(64),owner:'o'.repeat(64),audio:'a'.repeat(64),bridge:'b'.repeat(64)};
 const event={id:'event-current',text:'current event',channel:'minecraft'};
 const history=[{event_id:'event-before',input:'earlier',reply:'response'}];
 const unused=async()=>{throw new Error('unused dependency called');};

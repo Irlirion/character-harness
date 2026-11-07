@@ -53,6 +53,6 @@ Native PrismLauncher-клиент на Mac означает Docker core/engine/�
 
 ## Client bridge
 
-Архивная запись: в 2026-10 здесь документировался client-only Fabric companion с SVC. Companion, его source, token и HTTP routes удалены при переходе на UnionClef MCP. Запись сохранена только как исторический журнал; текущая интеграция описана в [UnionClef MCP](../unionclef-migration.md).
+Состояние на 2026-11-07: этот отдельный client-only companion восстановлен как transport для signed chat, voice STT и session observations. Игровые действия выключены и выполняются только UnionClef MCP. Текущая установка и секреты описаны в [UnionClef MCP](../unionclef-migration.md); после обновления нужно перезапустить `character-harness-test` и проверить live ingress.
 
 Требуется перезапустить только `character-harness-test`, затем вручную проверить адресованное сообщение на сервере. API передаёт UUID из серверного chat context, но это не доказывает онлайн-аутентичность аккаунта; на offline-mode сервере UUID не годится для межканальной идентификации.

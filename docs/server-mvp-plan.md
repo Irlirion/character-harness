@@ -33,7 +33,7 @@
 
 ### 3. Обязательный голос
 
-Ранее использовался client-only Fabric companion для SVC. Он удалён при переходе Minecraft control plane на UnionClef MCP. Текущая версия upstream не предоставляет chat/audio ingress и game voice output; TTS/audio worker остаётся отдельным host сервисом. Текущее подключение: [UnionClef MCP](unionclef-migration.md).
+Minecraft control plane использует UnionClef MCP, а ограниченный Fabric companion принимает signed chat и SVC/STT; companion не выполняет игровые действия. Исходящий звук идёт через native TTS/audio worker, Loopback и Simple Voice Chat. Полный автоматический voice dialogue ещё требует live-проверки после входа клиента; текущее подключение: [UnionClef MCP](unionclef-migration.md).
 
 Готовность: участник рядом слышит ответ; устаревшая/отменённая реплика не начинается; ошибка TTS не блокирует текстовый ответ и не вызывает дубли.
 

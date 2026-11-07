@@ -3,6 +3,8 @@
 services:
   core:
     environment:
+      BRIDGE_CLIENT_WORLD_ENABLED: 'true'
+      BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO: 'true'
       UNIONCLEF_MCP_URL: http://host.docker.internal:25350/mcp
       UNIONCLEF_MCP_TOKEN_FILE: /run/secrets/unionclef_mcp_token
     secrets: [unionclef_mcp_token]

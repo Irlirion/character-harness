@@ -1,17 +1,20 @@
 # Minecraft через UnionClef MCP
 
-Проект использует установленный UnionClef как единственный Minecraft runtime. Custom Fabric companion и его bridge HTTP endpoints удалены. Скрипт установки включает authenticated MCP и удаляет companion jar/config из выбранного Prism instance, предварительно сохраняя их в backup. После установки нужен перезапуск только этого экземпляра.
+Проект использует гибридную клиентскую схему. UnionClef MCP — единственный исполнитель игровых действий; Fabric client companion передаёт подписанный чат, STT и наблюдения server session. Companion actions и system chat выключены. После установки UnionClef и companion перезапустите выбранный Prism instance.
 
 ## Установка
 
 Закреплённый upstream: [3ndetz/unionclef](https://github.com/3ndetz/unionclef), `v0.95.63`, Minecraft `1.21.11` / Fabric / Java 21. Артефакт проверяется по SHA256 перед установкой. Выполните dry run и примените изменения к выделенному тестовому instance:
 
 ```sh
+node --experimental-strip-types scripts/setup-bridge-secret.ts
+node --experimental-strip-types scripts/setup-stt-secret.ts
+node --experimental-strip-types scripts/download-stt-model.ts
 node --experimental-strip-types scripts/setup-unionclef.ts '/absolute/path/to/instance/minecraft'
 node --experimental-strip-types scripts/setup-unionclef.ts '/absolute/path/to/instance/minecraft' --apply
 ```
 
-Скрипт включает аутентифицированный MCP endpoint на `127.0.0.1:25350`, создаёт отдельный локальный token-файл, ставит только UnionClef и складывает удалённые bridge jar/config в `minecraft/character-harness-backups`. Прочие игровые настройки сохраняются. Установщик оставляет включёнными возможности break/place, настроенные в Tungsten.
+Скрипт включает аутентифицированный MCP endpoint на `127.0.0.1:25350`, создаёт отдельный локальный token-файл, устанавливает UnionClef и пересобранный companion jar, а прежние jar/config предварительно складывает в `minecraft/character-harness-backups`. В properties включаются signed chat ingress, STT и наблюдения; `actions_enabled`, system chat и внутренние UnionClef flags выключены. Прочие игровые настройки сохраняются. Возможности break/place остаются настройкой UnionClef/Tungsten.
 
 ## Подключение core
 
@@ -19,23 +22,24 @@ node --experimental-strip-types scripts/setup-unionclef.ts '/absolute/path/to/in
 
 ```sh
 UNIONCLEF_MCP_TOKEN_PATH='/absolute/path/to/instance/minecraft/config/character-harness-unionclef-mcp.token' \
-  docker compose -f compose.yaml -f compose.unionclef.yaml up -d core
+  docker compose -f compose.yaml -f compose.unionclef.yaml --profile stt up -d core stt
 ```
 
-Оверлей соединяет core с `http://host.docker.internal:25350/mcp`. Без него Minecraft MCP считается не настроенным. Панель раз в пять секунд показывает результат read-only вызовов `tools/list` и `getGameState`, число опубликованных инструментов, позицию и число игроков.
+Оверлей соединяет core с `http://host.docker.internal:25350/mcp`, включает ограничения для тестового мира и подключает локальный STT service. Без него Minecraft MCP считается не настроенным. Панель раз в пять секунд показывает результат read-only вызовов `tools/list` и `getGameState`, число опубликованных инструментов, позицию и число игроков; отдельная карточка показывает свежий сигнал companion и readiness чата/голоса.
 
 ## Граница возможностей upstream
 
-Проверенная версия UnionClef предоставляет полный MCP-каталог и `getGameState`, но не сообщает core адрес подключённого сервера, UUID сессии/переподключения, устойчивые ID входящих сообщений или поток Simple Voice Chat. Поэтому:
+Проверенная версия UnionClef предоставляет полный MCP-каталог и `getGameState`, но не сообщает core адрес подключённого сервера или UUID сессии/переподключения. Companion передаёт server/session scope для inbound chat/STT и наблюдений отдельно от MCP действий. Поэтому:
 
 - панель может показать, что MCP доступен и клиент находится в мире, но не может подтвердить, что это ожидаемый сервер;
 - прямые наблюдения помечаются как локальные и непроверенные;
 - вызов `ConnectToServer` заблокирован; смена сервера делается вручную владельцем;
-- входящий игровой чат, STT и голосовые ответы в Minecraft недоступны после удаления companion;
-- native Qwen TTS/audio worker остаётся отдельным сервисом, но его heartbeat не доказывает, что игрок услышал звук.
+- session fencing inbound chat/STT не является server/session fencing для MCP действий;
+- входящий voice STT требует Simple Voice Chat, разрешённого сервера и готового локального STT service;
+- native Qwen TTS/audio worker остаётся отдельным сервисом, и его heartbeat не доказывает, что игрок услышал звук.
 
-Для полного автономного игрового цикла upstream должен добавить достоверный server/session status и события чата/голоса с устойчивыми идентификаторами. До этого агент получает MCP-инструменты при активном мире, но не просыпается от сообщений Minecraft сам по себе. Пауза персонажа и epoch проверки core продолжают ограничивать вызовы.
+Для полного автономного игрового цикла остаются live-проверки chat/reply/reconnect и STT/SVC пути. Пауза персонажа и epoch проверки core продолжают ограничивать вызовы.
 
 ## Панель
 
-Откройте `http://localhost:3000/`, введите `OWNER_TOKEN` и нажмите «Подключить». Карточка UnionClef показывает прямой MCP статус; отметка о недоступном server/session identity видна явно. Исторические миграции таблиц bridge сохранены, чтобы обновления существующей базы данных оставались последовательными; текущий core эти таблицы и маршруты не использует.
+Откройте `http://localhost:3000/`, введите `OWNER_TOKEN` и нажмите «Подключить». Карточка UnionClef показывает MCP статус, карточка игрового чата/голоса — состояние companion, server session и readiness STT/SVC. Исторические миграции таблиц bridge сохранены для совместимости базы.

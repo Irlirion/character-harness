@@ -25,6 +25,7 @@
     <article class="card"><h2>Персонаж</h2><div class="value" id="character">—</div><div class="small" id="character-state">Ожидает подключения</div><button class="control" id="character-toggle" type="button" disabled>Подключите панель</button><div class="small control-detail" id="control-detail">Управление доступно после подключения токена владельца.</div></article>
     <article class="card"><h2>Ядро и база</h2><div id="core" class="value">—</div><div class="small" id="core-detail">—</div></article>
     <article class="card"><h2>UnionClef MCP</h2><div id="minecraft" class="value">—</div><div class="small" id="minecraft-detail">—</div></article>
+    <article class="card"><h2>Игровой чат и голос</h2><div id="game-bridge" class="value">—</div><div class="small" id="game-bridge-detail">—</div></article>
     <article class="card"><h2>Движок и голос</h2><div id="engine" class="value">—</div><div class="small" id="engine-detail">—</div></article>
     <article class="card wide"><h2>Сейчас занимается</h2><div class="activity" id="doing">Нет активной задачи</div><div class="small" id="doing-detail">—</div></article>
     <article class="card"><h2>Очередь событий</h2><div class="value" id="pending">—</div><div class="small" id="processed">—</div></article>
@@ -33,7 +34,7 @@
     <article class="card"><h2>Telegram</h2><div class="value" id="telegram">—</div><div class="small" id="telegram-detail">—</div></article>
     <article class="card full"><h2>Событие в обработке</h2><div class="event" id="event">—</div><div class="chips" id="event-tags"></div></article>
   </section>
-  <div class="notice">Состояние Minecraft читается напрямую через UnionClef MCP. Текущая версия UnionClef не сообщает адрес сервера и идентификатор переподключения, поэтому панель не может подтвердить серверную сессию. Входящий игровой чат и голос в Minecraft сейчас недоступны.</div>
+  <div class="notice">UnionClef управляет персонажем в мире. Fabric companion передаёт игровой чат и голосовые транскрипты в Core только с разрешённого сервера и привязывает их к текущей сессии. Звуковой ответ зависит от готовности TTS и выбранного микрофонного устройства Simple Voice Chat.</div>
 </main>
 <script>
 (() => {
@@ -54,6 +55,7 @@
     set('character',o.character?.name||o.character?.id||'—');set('character-state',o.character?.paused?'Пауза включена':`Работает · epoch ${o.character?.epoch}`);paintControl(o.character?.paused);
     $('core').innerHTML=state(o.signals?.core);set('core-detail',`PostgreSQL: ${o.signals?.database||'unknown'} · runtime ${s.runtime?.storage_enabled?'включён':'выключен'}`);
     $('minecraft').innerHTML=state(o.signals?.minecraft);set('minecraft-detail',o.world?.configured?`${o.world.tool_count??'—'} MCP-инструментов · ${o.world.self?.dimension||'мир не открыт'} · сервер и переподключение не подтверждаются`:'UnionClef MCP не настроен');
+    $('game-bridge').innerHTML=state(o.signals?.bridge);const features=o.bridge?.snapshot?.features;const clientFresh=!!o.bridge?.available&&!o.bridge?.stale&&!!o.bridge?.connected;const voiceIngress=!clientFresh?'нет сигнала клиента':!features?'нет данных о голосе':!features.voice_stt_enabled?'STT выключен':!features.voicechat_available?'Simple Voice Chat не найден':!features.stt_ready?'STT не готов':'STT готов';const chatIngress=clientFresh?(features?.chat_ingress?'включён':'выключен'):'нет сигнала клиента';const bridgeAge=Number(o.bridge?.age_ms);const bridgeAgeLabel=Number.isFinite(bridgeAge)&&bridgeAge<=60000?` · ${Math.round(bridgeAge/1000)} с назад`:o.bridge?.available?' · последний сигнал устарел':'';set('game-bridge-detail',`Чат: ${chatIngress} · голос: ${voiceIngress}${bridgeAgeLabel}`);
     $('engine').innerHTML=state(o.signals?.engine);set('engine-detail',`Engine: ${heartbeatDetail(o.workers?.engine)} · runtime protocol: ${s.runtime?.protocol_enabled?'включён':'выключен'}`);
     const a=o.character?.active_activity,e=o.character?.active_event;
     set('doing',a?.objective|| (e?`Обрабатывает сообщение в ${e.channel}`:o.character?.paused?'Персонаж на паузе':'Нет активной задачи'));

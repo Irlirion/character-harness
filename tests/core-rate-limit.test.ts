@@ -7,7 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { coreFetch } from '../packages/domain/core-http.ts';
 
-const tokens = { owner: 'o'.repeat(64), engine: 'e'.repeat(64), audio: 'a'.repeat(64) };
+const tokens = { owner: 'o'.repeat(64), engine: 'e'.repeat(64), audio: 'a'.repeat(64), bridge: 'b'.repeat(64) };
 const principal = { characterId: 'lada', audienceId: 'demo-public' };
 function harness() {
   let accesses = 0;
