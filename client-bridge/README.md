@@ -8,7 +8,7 @@ Client-only Fabric mod for Minecraft 1.21.11, Fabric Loader 0.19.5 and Fabric AP
 ./gradlew build
 ```
 
-The distributable is `build/libs/character-harness-bridge-0.1.0.jar`.
+The distributable is `build/libs/character-harness-bridge-0.2.0.jar`.
 
 ## Configure the test client
 
@@ -72,3 +72,9 @@ The observation, movement, and STT paths have offline schema/DB-smoke and Fabric
 The model chooses `voice`, public server `chat`, or silence with `turn_finish`. Chat replies are bounded to one ordinary line of at most 256 characters and sent using the client network chat API, only in the configured demo server/world session. Commands and control characters are rejected. Voice replies use the audio queue and still appear locally for inspection; they are not posted publicly.
 
 Public chat is claimed once before sending and expires 60 seconds after reply creation. Pause/epoch changes fence stale replies. A disconnect or crash after claim can lose a message; it is never automatically resent because the server delivery outcome is unknown. Older bridge clients do not receive public chat replies. Restart Minecraft after replacing the mod.
+
+## UnionClef MCP backend
+
+Use the pinned release and setup script in [the workspace guide](../docs/unionclef-migration.md). With `unionclef_workspace_enabled=true`, the companion publishes visible creatures/items and enforces the full-workspace heartbeat locally. Core connects directly to the authenticated UnionClef MCP and exposes its complete published tool catalog through `minecraft_tools`/`minecraft_call`, including from the verified owner Telegram DM. No upstream instructions are elevated to authority. `minecraft_stop` and the client watchdog stop the independent task engines.
+
+The optional `compose.unionclef.yaml` configures the core connection; the MCP token remains a mounted secret. Setup enables block breaking/placement and backs up previous settings. Without full-workspace configuration, `unionclef_enabled=true` retains the older navigation-only `agent_goto` fallback. Chat, voice, observation opt-ins and the configured server scope remain in effect.

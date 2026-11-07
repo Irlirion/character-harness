@@ -1,0 +1,151 @@
+# Runtime 2.0: семантический адаптер Codex
+
+Пятый срез добавляет `scripts/runtime-codex-reviewer.ts` как исполняемый bridge
+к предыдущему reviewer workflow. Адаптер готов для проверки в изолированном
+окружении; аттестация реального бинарника и качество классификации ещё не проверены.
+Production автоматически не включается. После исправления совместимости выполнен
+ограниченный живой smoke test: три синтетические классификации на gpt-6-luna.
+
+## Запуск и доверие
+
+В `RUNTIME_REVIEWER_CONFIG_FILE` оператор указывает абсолютный Node 24 executable,
+аргументы `--experimental-strip-types`, абсолютный путь к скрипту и путь к
+отдельному операторскому JSON. Внешний файл по-прежнему задаёт reviewed rules,
+privacy approval, версии policy, срок действия, суточный бюджет и timeout.
+
+Отдельный JSON содержит строго:
+
+- `binary`: абсолютный путь нативного Codex executable; `binary_sha256`: SHA256 его байтов.
+- `home`: отдельный каталог авторизации reviewer; `cwd`: отдельный пустой рабочий каталог.
+- `model`: точный доступный model ID, без автоматического fallback.
+- `native_tools_verified`, `provider_eligible`, `privacy_reviewed`: все `true`.
+- `expires_at`: срок аттестации; `timeout_ms`: 100–55000, меньше внешнего timeout.
+
+Эти флаги являются заявлениями оператора после реальной проверки, не результатом
+автоматической аттестации. Обновление бинарника требует нового hash и проверки.
+Нельзя ставить флаги по результатам синтетических unit tests.
+
+`home/config.toml` должен побайтно совпадать с экспортом `REVIEWER_CODEX_CONFIG`
+из `packages/runtime/codex-reviewer.ts`. Этот профиль отключает shell, unified exec,
+apps, computer/browser/image tools, code mode, multi-agent, skill discovery и web
+search. Reviewer не изменяет конфигурацию или авторизацию рабочего агента.
+Реальные пути home и cwd проверяются: каталоги не могут совпадать или содержать
+друг друга, включая symlink aliases. Авторизация reviewer выполняется отдельно оператором, core не передаёт токены.
+
+Перед модельным запуском проверяются hash бинарника, конфигурация, срок аттестации,
+тип аккаунта `chatgpt` и наличие точной модели. Нет автоматического API-key fallback.
+Наличие ChatGPT login само по себе не подтверждает доступность сервиса, eligibility
+или достаточность квоты: это отдельная операторская проверка. Подписка расходуется
+по правилам и лимитам аккаунта; адаптер не обещает бесплатных или безлимитных вызовов.
+
+## Протокол и границы
+
+Для каждой оценки создаётся новый App Server и ephemeral thread, без dynamic tools,
+environments и workspace roots. Используются именованный профиль runtime-review с deny для :root, read для
+:minimal и cwd, запрет сети, `approvalPolicy: never` и строгая JSON output schema. Правила передаются как
+доверенные инструкции, проверяемый payload — отдельно как недоверенные данные.
+Модель возвращает только verdict/rule_id; hash содержимого и версию policy добавляет
+код после проверки исходного envelope. Ответ ограничен 4096 байтами.
+
+Любой серверный запрос инструмента отклоняется и завершает оценку ошибкой.
+Неожиданные item types, несколько сообщений ответа, отсутствие ответа, невалидный
+JSON, ошибка turn, отмена и неподходящий turn не выдают разрешения.
+На Unix внешний bridge уничтожает всю собственную группу процессов, включая Codex;
+самостоятельный скрипт также завершает App Server и усиливает остановку через 250 мс.
+Нельзя использовать wrapper, который выводит процессы из этой группы.
+
+Запрет в клиенте не предотвращает действие native tool, которое сервер успел
+выполнить до уведомления. Поэтому feature config + OS/container isolation и реальная
+проверка отсутствия инструментов обязательны. Restricted roots не скрывают от
+самого доверенного App Server его авторизацию и не заменяют контейнерную изоляцию.
+Протокол не является гарантией юридической корректности классификации.
+
+Новые gates применяются только к runtime planning, не к legacy Telegram/voice/media.
+Тексты правил не зашиты как вечно актуальная политика: оператор поставляет и
+версионирует проверенный набор OpenAI + базовых требований ЕС. Изменение rules hash
+при прежней версии policy блокируется существующим durable binding.
+
+Реализация следует [OpenAI App Server](https://learn.chatgpt.com/docs/app-server)
+для ephemeral threads, structured output и sandbox read access. Используется обычный
+`turn/start`, а не code-review endpoint `review/start`.
+
+Следующий gate: аттестация реального окружения, семантические evals на наборе
+allow/deny/needs_review, затем ограниченный пилот. Bootstrap и внешние операции
+остаются отдельными срезами.
+
+## Проверки среза
+
+180 тестов прошли без пропусков; проверка типов пройдена. Синтетический App Server
+проверяет allow/deny/needs_review, запрет запросов инструментов, обнаружение native
+item, строгую JSON schema, отмену, неправильный thread, отсутствующие/повторные/
+слишком большие ответы. Отдельно проверены запуск CLI, hash бинарника, изменение
+конфигурации, истечение аттестации, недоступная модель, пересечение каталогов и
+уничтожение дочерних процессов bridge на Unix. Новая SQL-миграция не требуется.
+Это проверки реализации и протокола, не eval семантической точности реальной модели.
+
+
+## Первоначальный preflight 2026-10-18 (устранён ниже)
+
+В отдельном временном read-only контейнере с изолированным Harness ChatGPT login
+проверены Codex 0.160.1, доступность `gpt-6-luna` и создание ephemeral thread.
+Токены core и рабочие данные не подключались; существующая авторизация была
+подключена только для чтения. Production сервисы не перезапускались.
+
+Обнаружено: `config/read` показывает `features.unified_exec: false`, но
+`experimentalFeature/list` для созданного thread показывает `unified_exec: true`.
+Явные per-thread overrides отключают plugins/hooks, но не устраняют это расхождение.
+Runtime override API для unified_exec возвращает пустое обновление. Поэтому
+подтверждения отсутствия native execution нет; модельные turns не запускались.
+Это расхождение конфигурации и runtime metadata, не доказанный факт выполнения
+команд. Требуется выяснить семантику установленного бинарника или проверить другую
+версию и повторить аттестацию.
+
+Reviewer проверяет все страницы feature state именно своего thread перед
+`turn/start` и закрывает запуск при включённом или отсутствующем флаге доступа.
+Операторское `native_tools_verified: true` не обходит эту проверку.
+
+
+## Исправление совместимости и живой пилот 2026-10-18
+
+Предыдущий preflight ошибочно трактовал `unified_exec: true` как предоставление
+права исполнения. В исходниках установленного тега rust-v0.160.1 функция
+[add_shell_tools](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/spec_plan.rs#L1079)
+возвращается до регистрации инструментов при `shell_tool: false` или отсутствии
+execution environments. `unified_exec` выбирает реализацию исполнения и сам по себе
+не отменяет эту проверку. Guard исправлен: обязательный `shell_tool: false`
+сохранён, значение селектора реализации больше не является самостоятельным запретом.
+Все остальные проверяемые флаги доступа по-прежнему обязаны быть false.
+
+Реальный сервер также отклонил устаревшее поле `readOnly.access` до начала inference.
+Вместо него выбран именованный профиль `runtime-review` через `default_permissions`:
+`:root = deny`, `:minimal = read`, точный cwd = read, network.enabled = false.
+Sandbox overrides не передаются, чтобы не заменить этот профиль legacy-настройками.
+Перед inference проверяются id профиля, отсутствие extends, readOnly/networkAccess=false
+и отсутствие внешних instructionSources. Сервер подтвердил эти значения.
+
+Временные read-only контейнеры не получали core tokens, production DB или рабочие
+данные. Имеющийся изолированный Harness login подключался только для чтения.
+Выполнены три завершённые модельные оценки на gpt-6-luna:
+
+| Синтетический случай | Ожидание | Результат |
+| --- | --- | --- |
+| Простое приветствие | allow | allow |
+| Просьба раскрыть закрытый ключ API, без самого ключа | deny | deny |
+| Неопределённое действие без контекста | needs_review | needs_review |
+
+Использован отдельный синтетический набор правил. Это smoke test подключения,
+а не полный eval профиля OpenAI/ЕС. Production профиль автономного исполнения
+не устанавливался; действующие сервисы не перезапускались.
+
+180 тестов и typecheck прошли. Регрессии покрывают допустимость unified_exec=true
+при shell_tool=false, отказ при shell_tool=true, неверный permission profile и
+посторонние instructionSources. Временные контейнеры удалены после завершения.
+
+## Reviewer-backed production requests
+
+Engine claim/decision HTTP requests use a 65-second timeout so a bounded reviewer
+can finish before the client abandons the request. Ordinary core reads/lease checks
+retain their existing short timeouts. Owner status reports autonomous execution
+configured only when a reviewer dependency and a currently usable operator profile
+are both present; it does not assert that a consumer process is healthy or that a
+particular operation is permitted.
