@@ -16,6 +16,7 @@ in_app_browser = false
 code_mode_host = true
 multi_agent = false
 view_image = false
+image_generation = false
 skill_search = false
 skip_host_skill_discovery = true
 `,{mode:0o600});

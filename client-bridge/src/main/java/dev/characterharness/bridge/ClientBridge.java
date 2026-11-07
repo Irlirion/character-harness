@@ -83,6 +83,10 @@ public final class ClientBridge implements ClientModInitializer {
     private SttServiceClient sttService;
     private boolean systemServerWarningLogged;
     private ClientActionController actionController;
+    private UnionClefNavigation unionclef;
+    private String workspaceCoreId;
+    private final WorkspaceLease workspaceLease=new WorkspaceLease();
+    private final ScheduledExecutorService workspaceIo=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"character-harness-workspace");t.setDaemon(true);return t;});
 
     @Override public void onInitializeClient() {
         try {
@@ -100,9 +104,11 @@ public final class ClientBridge implements ClientModInitializer {
             ClientReceiveMessageEvents.GAME.register((message, overlay) -> onSystemChat(message.getString(), overlay));
             LOG.info("Unverified system-chat adapter enabled for {}; it is limited to the public demo scope.", config.systemChatServer());
         }
-        actionController = new ClientActionController(this::completeClientAction,id -> java.util.Objects.equals(activeWorldSessionId,id));
+        if(config.unionclefEnabled())unionclef=new UnionClefNavigation(new UnionClefMcp(config.unionclefUrl(),config.unionclefToken()),UnionClefGuard::emergencyStop);
+        actionController = new ClientActionController(this::completeClientAction,id -> java.util.Objects.equals(activeWorldSessionId,id),unionclef);
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
         ClientLifecycleEvents.CLIENT_STOPPING.register(this::onClientStopping);
+        if(config.workspaceEnabled()&&config.unionclefEnabled())workspaceIo.scheduleWithFixedDelay(this::pollWorkspaceLease,0,500,TimeUnit.MILLISECONDS);
         io.scheduleWithFixedDelay(this::pollReplies, 1, 1, TimeUnit.SECONDS);
         if (config.actionsEnabled()) actionIo.scheduleWithFixedDelay(this::pollActions, 0, 150, TimeUnit.MILLISECONDS);
         LOG.info("Bridge enabled for visible user chat; account UUIDs are forwarded as supplied by the server chat context. systemChatEnabled={}", config.systemChatEnabled());
@@ -112,8 +118,11 @@ public final class ClientBridge implements ClientModInitializer {
         if (actionController != null) actionController.cancel(client, "client_shutdown");
         pcmSegmenter.clear();
         clearQueuedStt();
+        workspaceLease.revoke(UnionClefGuard::emergencyStopAll);
+        workspaceIo.shutdownNow();
         io.shutdownNow();
         observationIo.shutdownNow();
+        if(unionclef!=null)unionclef.close();
         actionIo.shutdown();
         sttIo.shutdownNow();
         instance = null;
@@ -233,11 +242,35 @@ public final class ClientBridge implements ClientModInitializer {
                 json.getAsJsonObject("args").has("strafe")?json.getAsJsonObject("args").get("strafe").getAsDouble():0,
                 json.getAsJsonObject("args").has("yaw_degrees")?json.getAsJsonObject("args").get("yaw_degrees").getAsDouble():0,
                 json.getAsJsonObject("args").has("pitch_degrees")?json.getAsJsonObject("args").get("pitch_degrees").getAsDouble():0,
-                json.get("duration_ms").getAsInt(),OffsetDateTime.parse(json.get("expires_at").getAsString()).toInstant().toEpochMilli(),json.get("session_id").getAsString());
+                json.get("duration_ms").getAsInt(),OffsetDateTime.parse(json.get("expires_at").getAsString()).toInstant().toEpochMilli(),json.get("session_id").getAsString(),
+                json.getAsJsonObject("args").has("x")?json.getAsJsonObject("args").get("x").getAsInt():0,
+                json.getAsJsonObject("args").has("y")?json.getAsJsonObject("args").get("y").getAsInt():0,
+                json.getAsJsonObject("args").has("z")?json.getAsJsonObject("args").get("z").getAsInt():0);
+    }
+
+    private void pollWorkspaceLease(){
+        try{
+            HttpResponse<String> r=request("GET","/bridge/minecraft/lease",null);
+            if(r.statusCode()!=200)return;
+            JsonObject lease=JsonParser.parseString(r.body()).getAsJsonObject();
+            MinecraftClient.getInstance().execute(()->{
+                if(lease.has("enabled")&&lease.get("enabled").getAsBoolean()&&lease.has("valid")&&lease.get("valid").getAsBoolean()
+                    &&activeWorldSessionId!=null&&activeWorldSessionId.equals(lease.get("session_id").getAsString()))
+                {
+                    String id=lease.get("lease_id").getAsString();
+                    if(workspaceCoreId!=null&&!workspaceCoreId.equals(id))workspaceLease.revoke(UnionClefGuard::emergencyStopAll);
+                    workspaceCoreId=id;
+                    workspaceLease.accept(activeWorldSessionId,lease.get("epoch").getAsLong(),System.currentTimeMillis(),UnionClefGuard::emergencyStopAll);
+                }
+                else workspaceLease.revoke(UnionClefGuard::emergencyStopAll);
+            });
+        }catch(Exception ignored){} // Tick expiry stops locally even if this request cannot finish.
     }
 
     private void onClientTick(MinecraftClient client) {
+        if(unionclef!=null)unionclef.enforceStop();
         syncWorldSession(client);
+        if(config.workspaceEnabled())workspaceLease.enforce(activeWorldSessionId,System.currentTimeMillis(),UnionClefGuard::emergencyStopAll);
         if(config.observationEnabled()&&activeWorldSessionId!=null&&++observationTicks>=20){observationTicks=0;publishWorldObservation(client);}
         if (actionController != null) actionController.tick(client);
     }
@@ -379,9 +412,11 @@ public final class ClientBridge implements ClientModInitializer {
         JsonObject self=new JsonObject();self.addProperty("x",client.player.getX());self.addProperty("y",client.player.getY());self.addProperty("z",client.player.getZ());
         self.addProperty("yaw",MathHelper.wrapDegrees(client.player.getYaw()));self.addProperty("pitch",client.player.getPitch());
         Vec3d v=client.player.getVelocity();self.addProperty("vx",v.x);self.addProperty("vy",v.y);self.addProperty("vz",v.z);
+        self.addProperty("minecraft_workspace_ready",config.workspaceEnabled()&&UnionClefGuard.ready(true)&&workspaceLease.valid(activeWorldSessionId,System.currentTimeMillis()));
         self.addProperty("on_ground",client.player.isOnGround());self.addProperty("health",client.player.getHealth());
+        if(unionclef!=null&&unionclef.available()&&UnionClefGuard.ready())self.addProperty("navigation_backend","unionclef_mcp");
         self.addProperty("dimension",client.world.getRegistryKey().getValue().toString());
-        ClientActionController.Action forward=new ClientActionController.Action("snapshot","snapshot","walk",1,0,0,0,300,System.currentTimeMillis()+1000,activeWorldSessionId);
+        ClientActionController.Action forward=new ClientActionController.Action("snapshot","snapshot","walk",1,0,0,0,300,System.currentTimeMillis()+1000,activeWorldSessionId,0,0,0);
         ClientActionController.StepCheck step=ClientActionController.checkStep(client,forward);
         self.addProperty("collision_ahead",step.collisionAhead());self.addProperty("support_ahead",step.supportAhead());
         step.addSummary(self,client.player.isOnGround());body.add("self",self);
@@ -403,11 +438,27 @@ public final class ClientBridge implements ClientModInitializer {
         candidates.sort(Comparator.comparingDouble(p->p.get("distance").getAsDouble()));
         for(int i=0;i<Math.min(8,candidates.size());i++){JsonObject candidate=candidates.get(i);visible.add(candidate);recognized.put(UUID.fromString(candidate.get("uuid").getAsString()),candidate);}
         nearbyPlayers=Map.copyOf(recognized);body.add("players",visible);
+        JsonArray entities=new JsonArray();ArrayList<JsonObject> entityCandidates=new ArrayList<>();
+        for(var entity:client.world.getOtherEntities(client.player,client.player.getBoundingBox().expand(32))){
+            if(entity instanceof PlayerEntity||entity.isRemoved()||entity.isInvisibleTo(client.player))continue;
+            double distance=Math.sqrt(entity.squaredDistanceTo(client.player));if(distance>32)continue;
+            Vec3d target=entity.getBoundingBox().getCenter();
+            HitResult obstruction=client.world.raycast(new RaycastContext(eye,target,RaycastContext.ShapeType.COLLIDER,RaycastContext.FluidHandling.NONE,client.player));
+            if(obstruction.getType()!=HitResult.Type.MISS&&obstruction.getPos().squaredDistanceTo(eye)+0.09<target.squaredDistanceTo(eye))continue;
+            JsonObject e=new JsonObject();e.addProperty("uuid",entity.getUuidAsString());e.addProperty("type",Registries.ENTITY_TYPE.getId(entity.getType()).toString());
+            e.addProperty("x",entity.getX());e.addProperty("y",entity.getY());e.addProperty("z",entity.getZ());e.addProperty("distance",distance);
+            e.addProperty("bearing_degrees",RelativeBearing.degrees(entity.getX()-client.player.getX(),entity.getZ()-client.player.getZ(),yaw));e.addProperty("line_of_sight",true);
+            if(entity instanceof net.minecraft.entity.ItemEntity item){e.addProperty("item_id",Registries.ITEM.getId(item.getStack().getItem()).toString());e.addProperty("count",item.getStack().getCount());}
+            entityCandidates.add(e);
+        }
+        entityCandidates.sort(Comparator.comparingDouble(e->e.get("distance").getAsDouble()));
+        for(int i=0;i<Math.min(64,entityCandidates.size());i++)entities.add(entityCandidates.get(i));
+        body.add("entities",entities);
         JsonObject crosshair=new JsonObject();
         if(client.crosshairTarget==null)crosshair.addProperty("type","none");
         else if(client.crosshairTarget.getType()==HitResult.Type.MISS)crosshair.addProperty("type","miss");
         else if(client.crosshairTarget instanceof EntityHitResult hit&&hit.getEntity() instanceof PlayerEntity player){crosshair.addProperty("type","player");crosshair.addProperty("player_uuid",player.getUuidAsString());crosshair.addProperty("player_name",player.getGameProfile().name());crosshair.addProperty("distance",Math.sqrt(player.squaredDistanceTo(client.player)));}
-        else if(client.crosshairTarget instanceof EntityHitResult hit){crosshair.addProperty("type","entity");crosshair.addProperty("distance",Math.sqrt(hit.getEntity().squaredDistanceTo(client.player)));}
+        else if(client.crosshairTarget instanceof EntityHitResult hit){crosshair.addProperty("type","entity");crosshair.addProperty("entity_type",Registries.ENTITY_TYPE.getId(hit.getEntity().getType()).toString());crosshair.addProperty("distance",Math.sqrt(hit.getEntity().squaredDistanceTo(client.player)));}
         else if(client.crosshairTarget instanceof BlockHitResult hit){crosshair.addProperty("type","block");BlockPos pos=hit.getBlockPos();crosshair.addProperty("x",pos.getX());crosshair.addProperty("y",pos.getY());crosshair.addProperty("z",pos.getZ());crosshair.addProperty("block_id",Registries.BLOCK.getId(client.world.getBlockState(pos).getBlock()).toString());}
         else crosshair.addProperty("type","miss");
         body.add("crosshair",crosshair);
