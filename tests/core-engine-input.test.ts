@@ -6,6 +6,7 @@ import type {UnionClefWorkspace} from '../packages/minecraft/unionclef.ts';
 const tokens={engine:'e'.repeat(64),owner:'o'.repeat(64),audio:'a'.repeat(64),bridge:'b'.repeat(64)};
 const event={id:'event-current',text:'current event',channel:'minecraft'};
 const history=[{event_id:'event-before',input:'earlier',reply:'response'}];
+const client_observation={available:false,connected:false,stale:true,server:null,session_id:null,age_ms:null,snapshot:null};
 const unused=async()=>{throw new Error('unused dependency called');};
 function deps(next:unknown,requested:any[]):CoreDeps{return {
  pool:{query:async()=>({rows:[],rowCount:0}),end:async()=>{}},status:async()=>({paused:false,epoch:7}),search:async()=>[],remember:unused,
@@ -19,7 +20,7 @@ test('/engine/input includes conversation and a direct UnionClef observation for
  const app=buildApp({principal:{characterId:'lada',audienceId:'demo-public'},tokens,minecraft,deps:deps(event,requested)});
  try{
   const r=await app.inject({url:'/engine/input',headers:{authorization:`Bearer ${tokens.engine}`}});
-  assert.equal(r.statusCode,200);assert.deepEqual(r.json().recent_conversation,history);assert.deepEqual(r.json().world_observation,world);assert.deepEqual(requested,['event-current']);
+  assert.equal(r.statusCode,200);assert.deepEqual(r.json().recent_conversation,history);assert.deepEqual(r.json().world_observation,{...world,client_observation});assert.deepEqual(requested,['event-current']);
  }finally{await app.close();}
 });
 
@@ -27,6 +28,6 @@ test('/engine/input reports no Minecraft state when UnionClef is not configured'
  const app=buildApp({principal:{characterId:'lada',audienceId:'demo-public'},tokens,deps:deps(event,[])});
  try{
   const r=await app.inject({url:'/engine/input',headers:{authorization:`Bearer ${tokens.engine}`}});
-  assert.deepEqual(r.json().world_observation,{available:false,connected:false,stale:true,state:'not_configured'});
+  assert.deepEqual(r.json().world_observation,{available:false,connected:false,stale:true,state:'not_configured',client_observation});
  }finally{await app.close();}
 });

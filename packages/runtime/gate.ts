@@ -4,7 +4,7 @@ import { DomainError } from '../domain/policy.ts';
 import type { RuntimeStore } from '../storage/runtime.ts';
 import { RuntimeAuthorizationStore, profileUsable } from '../storage/runtime-authorization.ts';
 import { ClaimWorkSchema, WorkDecisionSchema } from './contracts.ts';
-import { RuntimeWorkSchema, readMinecraftGoal, validMinecraftGoalDecision, VERIFIED_GOAL_SUMMARY, VERIFIED_NAVIGATION_SUMMARY, WorkLeaseSchema, StartWorkSchema, UsageSchema, type RuntimeWork, type PlanningInput, type MinecraftGoalCriterion } from './protocol.ts';
+import { RuntimeWorkSchema, readMinecraftGoal, canonicalNavigationGoal, validMinecraftGoalDecision, VERIFIED_GOAL_SUMMARY, VERIFIED_NAVIGATION_SUMMARY, WorkLeaseSchema, StartWorkSchema, UsageSchema, type RuntimeWork, type PlanningInput, type MinecraftGoalCriterion } from './protocol.ts';
 import { fingerprint, decisionPayload, sourceFingerprint, requestPayload, reviewContent, type ContentReviewer } from './policy.ts';
 
 export interface RuntimeExecutionGate {
@@ -104,13 +104,24 @@ export class RuntimePolicyGate implements RuntimeExecutionGate {
  }
  async start(p:Principal,input:unknown){return this.auth.start(p,StartWorkSchema.parse(input));}
  async decide(p:Principal,input:unknown) {
-  const b=WorkDecisionSchema.parse(input);const g=await this.auth.decisionGrant(p,b);const current=await this.auth.profile(p);
+  let b=WorkDecisionSchema.parse(input);const g=await this.auth.decisionGrant(p,b);const current=await this.auth.profile(p);
   if(!g||!current||current.profile.version!==g.policy_version||current.profile_hash!==g.profile_hash||!profileUsable(current.profile,Date.now()))throw new DomainError('runtime_policy_stale');
   const goalInput=g.approved_input?.minecraft_goal?g.approved_input:null;
   const before=goalInput?readMinecraftGoal(goalInput.checkpoint):null;
   const after=goalInput?readMinecraftGoal(b.checkpoint):null;
+  if(goalInput&&!before&&after&&!goalInput.minecraft_build){
+   const canonical=canonicalNavigationGoal(after);
+   if(canonical)b={...b,checkpoint:JSON.stringify(canonical)};
+  }
   if(goalInput&&!validMinecraftGoalDecision(goalInput,b))
    throw new DomainError('minecraft_goal_progress_invalid');
+  // Older checkpoints may predate typed criteria or promise more than the
+  // available evidence can establish. Never report those goals as completed.
+  if(goalInput&&before&&after&&b.decision.action==='complete'&&!goalInput.minecraft_build){
+   const canonical=canonicalNavigationGoal(after);
+   if(!canonical)throw new DomainError('minecraft_goal_criteria_unsupported');
+   b={...b,checkpoint:JSON.stringify(canonical)};
+  }
   // For an already reviewed plan, retain only the progress counter and a fixed internal note.
   // Model-authored observations never enter this branch's persisted checkpoint.
   const continuation=b.decision.action==='continue'&&before&&after?{before,after}:null;

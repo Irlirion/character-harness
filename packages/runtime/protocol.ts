@@ -81,6 +81,15 @@ export function readMinecraftGoal(checkpoint:string|null){
  catch{return null;}
 }
 
+export function canonicalNavigationGoal(plan:z.infer<typeof MinecraftGoalCheckpoint>){
+ const criteria=plan.criteria;
+ if(!criteria||criteria.length!==2||criteria[0].kind!=='grounded'||criteria[1].kind!=='arrival')return null;
+ const ground=criteria[0],target=criteria[1];
+ return {...plan,goal:`Дойти до точки (${target.x}, ${target.y}, ${target.z}).`,
+  steps:[`Проверить опору и здоровье не ниже ${ground.min_health}.`,
+   `Переместиться к точке (${target.x}, ${target.y}, ${target.z}) и подтвердить прибытие.`]};
+}
+
 export function validMinecraftGoalDecision(input:PlanningInput, decision:PlanningDecision):boolean {
  const before=readMinecraftGoal(input.checkpoint), after=readMinecraftGoal(decision.checkpoint);
  if(decision.desk||decision.shared_desk||decision.initiative)return false;
@@ -95,7 +104,7 @@ export function validMinecraftGoalDecision(input:PlanningInput, decision:Plannin
   const base=criteria[0];
   if(base.kind!=='house'||!criteria.every((c,i)=>c.kind==='house'&&c.phase===['floor','walls','roof'][i]&&c.size==='7x5'
    &&c.x===base.x&&c.y===base.y&&c.z===base.z))return false;
- }else if(!before&&after.criteria?.some(c=>c.kind==='house'))return false;
+ }else if(!before&&!canonicalNavigationGoal(after))return false;
  if(!before)return decision.decision.action==='continue'&&!!after.criteria&&after.completed===0&&(input.activity.remaining_turns===null||after.steps.length<=input.activity.remaining_turns);
  return before.goal===after.goal&&JSON.stringify(before.steps)===JSON.stringify(after.steps)
   &&JSON.stringify(before.criteria)===JSON.stringify(after.criteria)

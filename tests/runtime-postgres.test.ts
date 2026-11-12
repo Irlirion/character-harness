@@ -151,6 +151,17 @@ test('runtime persistence, claims, fencing and recovery', { skip: !process.env.T
     });
 
     await reset();
+    await t.test('owner house goal remains available for an answer after scheduling', async () => {
+      const autonomous = new RuntimeStore(db,undefined,true);
+      const house=await autonomous.assign(p,{invocation_id:'house-request',objective:'Build a wooden house',minecraft_goal:'wooden_house'});
+      const waiting=(await db.query("UPDATE runtime_activities SET status='needs_input',question='Which entrance?',version=version+1 WHERE id=$1 RETURNING version",[house.id])).rows[0];
+      await autonomous.schedule(p,true);
+      assert.equal((await autonomous.inspect(p,house.id)).activity.status,'needs_input');
+      await autonomous.provideInput(p,house.id,{expected_version:waiting.version,text:'South'});
+      assert.equal((await autonomous.inspect(p,house.id)).activity.status,'ready');
+    });
+
+    await reset();
     await t.test('cancel fences active work and rejects stale versions', async () => {
       const a=await assign();const w=await claim();
       await assert.rejects(store.cancel(p,a.id,1),{code:'activity_version_conflict'});

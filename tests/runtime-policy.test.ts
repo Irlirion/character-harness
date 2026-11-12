@@ -75,9 +75,10 @@ test('canonical game completion accepts current evidence and never accepts an un
  const {VERIFIED_GOAL_SUMMARY}=await import('../packages/runtime/protocol.ts');
  const {randomUUID}=await import('node:crypto');
  const profile=testProfile();
- const plan={goal:'Survey the tree',steps:['Find the edge','Approach the trunk','Observe the trunk'],completed:1,observation:'Edge found'};
+ const plan={goal:'Build a house',steps:['Floor','Walls','Roof'],completed:1,observation:'Floor built',criteria:
+  ['floor','walls','roof'].map(phase=>({kind:'house',phase,size:'7x5',x:0,y:64,z:0}))};
  const grant={id:randomUUID(),state:'started',policy_version:profile.version,profile_hash:fingerprint(profile),
-  approved_input:{minecraft_goal:true,checkpoint:JSON.stringify(plan)}};
+  approved_input:{minecraft_goal:true,minecraft_build:'wooden_house',checkpoint:JSON.stringify(plan)}};
  let evidence=false, reviewerCalls=0;
  let persisted:unknown;
  const store={lease:async()=>({valid:true}),decide:async(_p:unknown,b:unknown,approval:any)=>{persisted=b;return approval.review.rule_id}};
@@ -104,4 +105,20 @@ test('canonical game completion accepts current evidence and never accepts an un
  await assert.rejects(gate.decide(principal,{...report,decision:{action:'complete',summary:'Unreviewed model output'}}),/minecraft_goal_completion_unconfirmed/);
  assert.equal(await gate.decide(principal,report),'minecraft_goal_steps_verified');
  assert.equal(reviewerCalls,0);
+ // A pre-existing unsupported goal must not be declared complete even when
+ // the last observation is valid: ground checks cannot prove a diamond was mined.
+ const legacy={goal:'Mine a diamond',steps:['Look around','Mine a diamond'],completed:1,observation:'Ready',criteria:[
+  {kind:'grounded',min_health:1},{kind:'grounded',min_health:1}]};
+ grant.approved_input={minecraft_goal:true,checkpoint:JSON.stringify(legacy)} as typeof grant.approved_input;
+ await assert.rejects(gate.decide(principal,{...report,checkpoint:JSON.stringify({...legacy,completed:2,observation:VERIFIED_GOAL_SUMMARY})}),/minecraft_goal_criteria_unsupported/);
+});
+
+test('navigation goals describe only what their criteria can verify',async()=>{
+ const {canonicalNavigationGoal}=await import('../packages/runtime/protocol.ts');
+ const plan={goal:'Mine a diamond',steps:['Observe','Mine a diamond'],completed:0,observation:'',criteria:[
+  {kind:'grounded' as const,min_health:1},{kind:'arrival' as const,x:5,y:64,z:9,radius:1}]};
+ const canonical=canonicalNavigationGoal(plan);
+ assert.ok(canonical);
+ assert.doesNotMatch(JSON.stringify(canonical),/diamond/);
+ assert.match(canonical.goal,/5, 64, 9/);
 });

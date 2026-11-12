@@ -83,7 +83,8 @@ export class RuntimeStore {
         summary=CASE WHEN status='needs_input' THEN 'Для продолжения не хватило данных Minecraft. Лада выберет другую цель.'
           ELSE 'Автономная цель остановлена политикой проверки.' END
         WHERE a.character_id=$1 AND a.audience_id=$2 AND a.origin='self' AND a.invocation_id LIKE 'minecraft-self:goal:%'
-          AND a.status IN ('ready','waiting_time','needs_input') AND (
+          AND a.status IN ('ready','waiting_time','needs_input')
+          AND coalesce(a.create_payload->>'minecraft_goal','')<>'wooden_house' AND (
             a.status='needs_input' OR EXISTS(
               SELECT 1 FROM runtime_policy_holds h JOIN runtime_policy_current c
                 ON c.character_id=h.character_id AND c.version=h.policy_version

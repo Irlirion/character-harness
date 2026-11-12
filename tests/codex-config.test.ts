@@ -19,6 +19,5 @@ test('Codex enables dynamic tool dispatch while keeping other built-in features 
 
 test('UnionClef guidance makes unverified server/session scope explicit', () => {
   assert.match(MINECRAFT_WORKSPACE_INSTRUCTIONS,/Discover minecraft_tools/);
-  assert.match(MINECRAFT_WORKSPACE_INSTRUCTIONS,/does not report the server address or reconnect session/);
-  assert.match(MINECRAFT_WORKSPACE_INSTRUCTIONS,/do not change servers through tools/);
+  assert.match(MINECRAFT_WORKSPACE_INSTRUCTIONS,/fresh session evidence after reconnecting/);
 });

@@ -23,7 +23,7 @@ test('owner, audio, bridge and engine prefixes map to their own role',()=>{
   assert.equal(requiredRole('/owner/pause'),'owner');
   assert.equal(requiredRole('/owner/replies'),'owner');
   assert.equal(requiredRole('/audio/claim'),'audio');
-  assert.equal(requiredRole('/bridge/events'),null);
+  assert.equal(requiredRole('/bridge/events'),'bridge');
   assert.equal(requiredRole('/engine/input'),'engine');
 });
 test('root-level routes are attributed explicitly',()=>{
