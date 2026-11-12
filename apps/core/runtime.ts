@@ -68,7 +68,7 @@ export function runtimeEngineRoutes(app:FastifyInstance,principal:Principal,poli
         ? snapshot.data.players.filter(player=>player.line_of_sight&&player.distance<=12).length
         : 0;
     };
-    app.post('/engine/work_minecraft',async req=>{
+    app.post('/engine/work_minecraft',{preHandler:app.rateLimit(),config:{rateLimit:{max:300,timeWindow:'1 minute',keyGenerator:()=> 'engine'}}},async req=>{
       const body=z.object({
         lease:WorkLeaseSchema,
         action:z.enum(['observe','surface','house_surface','navigate','path_status','speak','build','build_status','catalog','call']),
