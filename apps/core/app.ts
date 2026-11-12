@@ -12,7 +12,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import type { Principal } from '../../packages/domain/policy.ts';
-import { DomainError, matchesToken, requestPath, requiredRole } from '../../packages/domain/policy.ts';
+import { DomainError, OWNER_CHAT_AUDIENCE, matchesToken, requestPath, requiredRole } from '../../packages/domain/policy.ts';
 import { BridgeEventScopeError, parseBridgeEvent, SYSTEM_CHAT_SERVER } from '../../packages/domain/bridge-event.ts';
 import { isObservationTimeCurrent, worldObservationSchema } from '../../packages/domain/world-observation.ts';
 import { SocialMemoryDeltaSchema } from '../../packages/domain/social-memory.ts';
@@ -44,6 +44,7 @@ export type CoreDeps = {
   latestWorldObservation?: (p:Principal) => Promise<any>;
 };
 export type BuildAppOptions = {
+  shadowStatus?: () => {state:string;model:string};
   principal: Principal;
   tokens: CoreTokens;
   minecraft?:UnionClefWorkspace;
@@ -64,7 +65,7 @@ function emptySocialContext(): SocialContextInput {
 }
 
 /** Builds the HTTP surface. Environment, secrets and the database stay in main.ts. */
-export function buildApp({ principal, tokens, minecraft, deps, memoryInstructions = '', responseInstructions = '', telegram, images, runtime, runtimeEngine, runtimePolicy, allowClientWorld = false, allowSystemChatPublicDemo = false }: BuildAppOptions): FastifyInstance {
+export function buildApp({ shadowStatus, principal, tokens, minecraft, deps, memoryInstructions = '', responseInstructions = '', telegram, images, runtime, runtimeEngine, runtimePolicy, allowClientWorld = false, allowSystemChatPublicDemo = false }: BuildAppOptions): FastifyInstance {
 const app = Fastify({ logger: { redact: ['req.headers.authorization'] }, bodyLimit: 64 * 1024 });
 const dashboardHtml = readFileSync(new URL('./dashboard.html', import.meta.url), 'utf8');
 const HeartbeatSchema=z.object({component:z.enum(['codex-engine','pi-engine','audio-worker','tts-service']),state:z.enum(['starting','ready','busy','degraded','stopping']),error_code:z.string().regex(/^[a-z0-9_]{1,80}$/).nullable().optional()}).strict();
@@ -118,7 +119,7 @@ app.setErrorHandler((error, _req, reply) => {
   return reply.code(500).send({ error: 'internal_error' });
 });
 if (runtime) runtimeOwnerRoutes(app, principal, runtime);
-if (runtimeEngine) runtimeEngineRoutes(app,principal,runtimePolicy);
+if (runtimeEngine) runtimeEngineRoutes(app,principal,runtimePolicy,minecraft,deps.latestWorldObservation);
 if(telegram)telegramRoutes(app,telegram);
 if(images){
  app.get('/owner/images',{preHandler:app.rateLimit(),config:{rateLimit:{max:120,timeWindow:'1 minute',keyGenerator:()=> 'owner'}}},()=>images.status());
@@ -280,6 +281,40 @@ app.post('/audio/jobs/:id', async req => {
   const b=z.object({claim_id:z.string().uuid(),state:z.enum(['playing','completed','failed','cancelled'])}).strict().parse(req.body);
   return updateSpeech(principal,z.string().uuid().parse((req.params as {id:string}).id),b.claim_id,b.state);
 });
+const ownerChat = {...principal, audienceId: OWNER_CHAT_AUDIENCE};
+async function isOwnerChatEvent(eventId:string) {
+  const result = await pool.query('SELECT 1 FROM social_events WHERE id=$1 AND character_id=$2 AND audience_id=$3',
+    [eventId, principal.characterId, ownerChat.audienceId]);
+  return result.rows.length > 0;
+}
+app.post('/owner/chat', async req => {
+  const body = z.object({request_id:z.string().uuid(), text:z.string().trim().min(1).max(4000)}).strict().parse(req.body);
+  return ingest(ownerChat, {
+    source_key: `owner-dashboard:${body.request_id}`, author_id:'owner-dashboard',
+    text:body.text, author_provenance:'owner_input', author_trust:'unverified'
+  });
+});
+app.get('/owner/chat', async (_req, reply) => {
+  reply.header('Cache-Control','no-store');
+  const read = async (privateChat:boolean) => (await pool.query(`
+    SELECT e.id,e.text,e.channel,e.author_provenance,e.created_at,r.text AS reply,
+      s.decision AS shadow_decision,s.reason AS shadow_reason,s.latency_ms AS shadow_latency_ms,s.model AS shadow_model,s.scores AS shadow_scores,
+      CASE WHEN e.processed AND r.event_id IS NOT NULL THEN 'answered'
+           WHEN e.processed THEN 'closed'
+           WHEN c.active_event_id=e.id AND c.lease_until>now() AND NOT c.paused THEN 'active'
+           WHEN e.attempts>=3 THEN 'failed' ELSE 'queued' END AS status
+    FROM social_events e JOIN characters c ON c.id=e.character_id
+    LEFT JOIN replies r ON r.event_id=e.id
+    LEFT JOIN LATERAL (
+      SELECT * FROM shadow_decisions WHERE event_id=e.id
+      ORDER BY (model=$4) DESC NULLS LAST, model LIMIT 1
+    ) s ON true
+    WHERE e.character_id=$1 AND (e.audience_id=$2)=$3
+    ORDER BY e.created_at DESC,e.id DESC LIMIT 30
+  `,[principal.characterId,ownerChat.audienceId,privateChat,shadowStatus?.().model??null])).rows;
+  const [messages,feed] = await Promise.all([read(true),read(false)]);
+  return {messages,feed,shadow:shadowStatus?.()??{state:'disabled'}};
+});
 app.post('/owner/events', async req => {
   const event = z.object({
     source_key: z.string().min(1).max(200), author_id: z.string().min(1).max(200),
@@ -303,12 +338,14 @@ app.get('/engine/input', async (_req, reply) => {
   const world_observation=currentEvent&&currentEvent.channel!=='telegram'?await currentWorldObservation():undefined;
   const turn_input=currentEvent?makeTurnInput(currentEvent,memories,recent_conversation,world_observation,social_memory,await deps.loadSharedDesk?.(scoped)):null;
   return { character: state, audience_id: scoped.audienceId,
-    event: currentEvent, memories, recent_conversation, social_memory, world_observation, turn_input, memory_instructions:memoryInstructions,response_instructions:responseInstructions };
+    event: currentEvent, memories, recent_conversation, social_memory, world_observation, turn_input, memory_instructions:memoryInstructions,response_instructions:scoped.audienceId===OWNER_CHAT_AUDIENCE
+      ? responseInstructions+'\nThis message comes from the authenticated owner dashboard. Carry out the owner request within your tool permissions. Use turn_finish to report the result in writing in the dashboard.'
+      : responseInstructions };
 });
 app.get('/engine/observation',async()=>currentWorldObservation());
 app.post('/engine/defer', async req => {
   const body=z.object({event_id:z.string().uuid(),epoch:z.number().int().positive().optional()}).strict().parse(req.body);
-  const scoped=telegram&&body.epoch?await telegram.scope(body.event_id,body.epoch):principal;
+  const scoped=telegram&&body.epoch?await telegram.scope(body.event_id,body.epoch):await isOwnerChatEvent(body.event_id)?ownerChat:principal;
   return deps.deferEvent(scoped, body.event_id, body.epoch);
 });
 app.post('/engine/complete', async req => {
@@ -334,6 +371,8 @@ app.post('/engine/complete', async req => {
     if (parsed.success) delta = parsed.data;
     else diagnostic = 'schema_invalid';
   }
+  if(await isOwnerChatEvent(body.event_id))
+    return complete(ownerChat, body.event_id, text, body.epoch, false, delta, diagnostic, body.memory_delta, decision, 'local');
   return complete(principal, body.event_id, text, body.epoch, speak, delta, diagnostic, body.memory_delta,decision,channel);
 });
 async function gateway(scope?: {eventId:string;epoch:number},scopedPrincipal:Principal=principal,isTelegram=false,guard:()=>Promise<unknown>=async()=>{}) {
@@ -420,6 +459,7 @@ app.post('/mcp', async (req, reply) => {
     const current=await telegram.scope(scope.eventId,scope.epoch);scopedPrincipal=current;isTelegram=current.channel==='telegram';
     guard=()=>telegram.scope(scope.eventId,scope.epoch);
   }
+  if(!telegram && scope && await isOwnerChatEvent(scope.eventId)) scopedPrincipal=ownerChat;
   const legacyGuard=guard;
   guard=async()=>{if(runtimeEngine)await runtimeEngine.assertLegacyTurn(principal);await legacyGuard();};
   if(runtimeEngine)await runtimeEngine.assertLegacyTurn(principal);

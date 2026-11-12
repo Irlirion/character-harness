@@ -39,7 +39,7 @@ test('owner activity API enforces token role, bounded inputs and trusted princip
   const runtime: RuntimeOwnerStore={
     assign:async(...args)=>{calls.push(['assign',...args]);return row;},
     list:async(...args)=>{calls.push(['list',...args]);return [row];},
-    inspect:async(...args)=>{calls.push(['inspect',...args]);return {activity:row,checkpoint:null};},
+    inspect:async(...args)=>{calls.push(['inspect',...args]);return {activity:row,checkpoint:null,history:[],turns:[]};},
     cancel:async(...args)=>{calls.push(['cancel',...args]);return {...row,status:'cancelled'};},
     provideInput:async(...args)=>{calls.push(['input',...args]);return row;},
   };

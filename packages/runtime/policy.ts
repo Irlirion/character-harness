@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { ACTIVITY_DECIDE_TOOL, PLANNING_INSTRUCTIONS, type PlanningInput } from './protocol.ts';
+import { ACTIVITY_DECIDE_TOOL, minecraftPlanningInstructions, minecraftGoalOutputSchema, type PlanningInput } from './protocol.ts';
 
 const identifier=z.string().regex(/^[a-zA-Z0-9_.:-]{1,100}$/);
 export const RuntimeProfileSchema=z.object({
@@ -21,14 +21,14 @@ export function sourceFingerprint(a:any,checkpoint:string|null,persona:string) {
  return fingerprint({id:a.id,version:a.version,objective:a.objective,max_turns:a.max_turns,turns_used:a.turns_used,input_reply:a.input_reply??null,checkpoint,persona});
 }
 export function requestPayload(input:PlanningInput,persona:string,identity:ModelIdentity) {
- return {input,persona,instructions:PLANNING_INSTRUCTIONS,tool:ACTIVITY_DECIDE_TOOL,engine:identity.engine,model:identity.model};
+ return {input,persona,instructions:minecraftPlanningInstructions(input),tool:input.minecraft_goal?minecraftGoalOutputSchema(input):ACTIVITY_DECIDE_TOOL,engine:identity.engine,model:identity.model};
 }
 export function requestFingerprint(input:PlanningInput,persona:string,identity:ModelIdentity) {return fingerprint(requestPayload(input,persona,identity));}
 export const ReviewResultSchema=z.object({
  verdict:z.enum(['allow','deny','needs_review']),rule_id:identifier,policy_version:identifier,payload_hash:z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 export type ReviewResult=z.infer<typeof ReviewResultSchema>;
-export type ContentReviewer=(request:{phase:'input'|'output';payload:unknown;payload_hash:string;policy_version:string},signal:AbortSignal)=>Promise<ReviewResult>;
+export type ContentReviewer=(request:{phase:'input'|'output';payload:unknown;payload_hash:string;policy_version:string;scope?:'minecraft_checkpoint'|'minecraft_goal_input'},signal:AbortSignal)=>Promise<ReviewResult>;
 
 /** Only narrow, local secret checks; absence of a match is NOT content approval. */
 export function secretDetected(payload:unknown) {
@@ -36,7 +36,7 @@ export function secretDetected(payload:unknown) {
  return /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(s)||/\bsk-(?:proj-)?[a-zA-Z0-9_-]{20,}\b/.test(s)
   ||/\bBearer\s+[a-zA-Z0-9._~+\/-]{20,}/i.test(s)||/https?:\/\/[^\s"/@]+:[^\s"/@]+@/i.test(s);
 }
-export async function reviewContent(profile:RuntimeProfile,phase:'input'|'output',payload:unknown,reviewer?:ContentReviewer,timeoutMs=2000):Promise<ReviewResult> {
+export async function reviewContent(profile:RuntimeProfile,phase:'input'|'output',payload:unknown,reviewer?:ContentReviewer,timeoutMs=2000,scope?:'minecraft_checkpoint'|'minecraft_goal_input'):Promise<ReviewResult> {
  const payload_hash=fingerprint(payload);
  const result=(verdict:ReviewResult['verdict'],rule_id:string):ReviewResult=>({verdict,rule_id,policy_version:profile.version,payload_hash});
  if(secretDetected(payload))return result('deny','secret_detected');
@@ -45,7 +45,7 @@ export async function reviewContent(profile:RuntimeProfile,phase:'input'|'output
  const stop=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
  try{
   const timeout=new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>{stop.abort();reject(new Error('review_timeout'));},timeoutMs);});
-  const review=ReviewResultSchema.parse(await Promise.race([reviewer({phase,payload,payload_hash,policy_version:profile.version},stop.signal),timeout]));
+  const review=ReviewResultSchema.parse(await Promise.race([reviewer({phase,payload,payload_hash,policy_version:profile.version,...(scope?{scope}:{})},stop.signal),timeout]));
   if(review.payload_hash!==payload_hash||review.policy_version!==profile.version)return result('needs_review','review_binding_invalid');
   return review;
  }catch{return result('needs_review','review_failed');}

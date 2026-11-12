@@ -1,7 +1,7 @@
 import {deskContext,deskFingerprint,scheduleAutonomy,commitDesk} from './workplace.ts';
 import { sourceFingerprint, type ApprovedClaim, type ApprovedDecision } from '../runtime/policy.ts';
 import { reserveModelGrant, assertDecisionGrant } from './runtime-authorization.ts';
-import { WorkLeaseSchema } from '../runtime/protocol.ts';
+import { readMinecraftGoal, WorkLeaseSchema } from '../runtime/protocol.ts';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { DomainError } from '../domain/policy.ts';
@@ -12,9 +12,10 @@ import { CreateActivitySchema, ClaimWorkSchema, WorkDecisionSchema, ActivityPage
 export class RuntimeStore {
   private pool: pg.Pool;
   private client?:pg.PoolClient;
-  constructor(pool: pg.Pool,client?:pg.PoolClient) { this.pool = pool;this.client=client; }
+  private readonly minecraftAutonomy:boolean;
+  constructor(pool: pg.Pool,client?:pg.PoolClient,minecraftAutonomy=false) { this.pool = pool;this.client=client;this.minecraftAutonomy=minecraftAutonomy; }
   /** Participate in the authenticated Telegram update transaction, including offset/outbox. */
-  withTransaction(client:pg.PoolClient){return new RuntimeStore(this.pool,client);}
+  withTransaction(client:pg.PoolClient){return new RuntimeStore(this.pool,client,this.minecraftAutonomy);}
 
   private async transaction<T>(p: Principal, work: (db: pg.PoolClient, state: any) => Promise<T>): Promise<T> {
     const db = this.client??await this.pool.connect();
@@ -51,7 +52,7 @@ export class RuntimeStore {
     const b = CreateActivitySchema.parse(input);
     return this.transaction(p, async (db, state) => {
       const old = (await db.query(`SELECT *,create_payload=$4::jsonb AS matches FROM runtime_activities
-        WHERE character_id=$1 AND audience_id=$2 AND invocation_id=$3`, [p.characterId,p.audienceId,b.invocation_id,JSON.stringify(b)])).rows[0];
+        WHERE character_id=$1 AND audience_id=$2 AND invocation_id=$3`, [p.characterId,p.audienceId,b.minecraft_goal?`minecraft-self:goal:${b.invocation_id}`:b.invocation_id,JSON.stringify(b)])).rows[0];
       if (old) {
         if (!old.matches) throw new DomainError('invocation_conflict');
         const { matches, ...activity } = old;
@@ -62,16 +63,59 @@ export class RuntimeStore {
         AND status NOT IN ('completed','failed','cancelled')`, [p.characterId])).rows[0].n;
       if (count >= 100) throw new DomainError('activity_queue_full');
       const id = randomUUID();
+      const house=b.minecraft_goal==='wooden_house';
+      if(house&&!this.minecraftAutonomy)throw new DomainError('minecraft_goal_unavailable');
       const row = (await db.query(`INSERT INTO runtime_activities(id,character_id,audience_id,origin,requested_by,invocation_id,create_payload,objective,max_turns)
-        VALUES($1,$2,$3,'owner','owner',$4,$5,$6,$7) RETURNING *`,
-        [id,p.characterId,p.audienceId,b.invocation_id,JSON.stringify(b),b.objective,b.max_turns])).rows[0];
+        VALUES($1,$2,$3,$4,CASE WHEN $4='self' THEN 'runtime' ELSE 'owner' END,$5,$6,$7,$8) RETURNING *`,
+        [id,p.characterId,p.audienceId,house?'self':'owner',house?`minecraft-self:goal:${b.invocation_id}`:b.invocation_id,JSON.stringify(b),b.objective,house?null:b.max_turns])).rows[0];
       await this.wake(db,p,id,'created','created',state.db_now);
       await this.audit(db,id,1,'owner','created');
       return row;
     });
   }
 
-  async schedule(p:Principal){return this.transaction(p,async(db,state)=>{if(!state.paused)await scheduleAutonomy(db,p,new Date(state.db_now));});}
+  async schedule(p:Principal,minecraftReady=false){
+    return this.transaction(p,async(db,state)=>{
+      if(state.paused)return;
+      await scheduleAutonomy(db,p,new Date(state.db_now));
+      if(!this.minecraftAutonomy||!minecraftReady||state.active_event_id||state.active_runtime_turn_id)return;
+      const stalled=(await db.query(`UPDATE runtime_activities a SET status='failed',version=a.version+1,updated_at=now(),
+        summary=CASE WHEN status='needs_input' THEN 'Для продолжения не хватило данных Minecraft. Лада выберет другую цель.'
+          ELSE 'Автономная цель остановлена политикой проверки.' END
+        WHERE a.character_id=$1 AND a.audience_id=$2 AND a.origin='self' AND a.invocation_id LIKE 'minecraft-self:goal:%'
+          AND a.status IN ('ready','waiting_time','needs_input') AND (
+            a.status='needs_input' OR EXISTS(
+              SELECT 1 FROM runtime_policy_holds h JOIN runtime_policy_current c
+                ON c.character_id=h.character_id AND c.version=h.policy_version
+              WHERE h.activity_id=a.id AND h.activity_version=a.version
+            )
+          ) RETURNING a.id,a.version`,[p.characterId,p.audienceId])).rows;
+      for(const a of stalled){
+        await db.query(`UPDATE runtime_wakeups SET state='cancelled' WHERE activity_id=$1 AND state='pending'`,[a.id]);
+        await this.audit(db,a.id,a.version,'runtime','minecraft_goal_stalled');
+      }
+      const busy=await db.query(`SELECT 1 FROM runtime_activities
+        WHERE character_id=$1 AND audience_id=$2 AND (
+          (status IN ('ready','running') AND turns_used<max_turns AND NOT (origin='self' AND invocation_id LIKE 'minecraft-self:%'))
+        ) LIMIT 1`,[p.characterId,p.audienceId]);
+      if(busy.rowCount)return;
+      const openWake=await db.query(`SELECT 1 FROM runtime_activities WHERE character_id=$1 AND audience_id=$2
+        AND origin='self' AND invocation_id LIKE 'minecraft-self:goal:%'
+        AND status IN ('running','ready','waiting_time','needs_input') LIMIT 1`,[p.characterId,p.audienceId]);
+      if(openWake.rowCount)return;
+      const previous=(await db.query(`SELECT c.state FROM runtime_activities a
+        JOIN runtime_checkpoints c ON c.id=a.checkpoint_id
+        WHERE a.character_id=$1 AND a.audience_id=$2 AND a.invocation_id LIKE 'minecraft-self:goal:%'
+          AND a.status='completed' ORDER BY a.updated_at DESC LIMIT 1`,[p.characterId,p.audienceId])).rows[0];
+      const previousGoal=readMinecraftGoal(previous?.state??null)?.goal;
+      const id=randomUUID();
+      const objective='Выбери по игровой обстановке полезное занятие и доведи его до проверяемого результата за несколько ходов.';
+      await db.query(`INSERT INTO runtime_activities(id,character_id,audience_id,origin,requested_by,invocation_id,create_payload,objective,max_turns)
+        VALUES($1,$2,$3,'self','runtime',$4,$5,$6,NULL)`,[id,p.characterId,p.audienceId,`minecraft-self:goal:${id}`,JSON.stringify({previousGoal}),objective]);
+      await this.wake(db,p,id,'created','created',state.db_now);
+      await this.audit(db,id,1,'runtime','self_wake');
+    });
+  }
   async desk(p:Principal){return deskContext(this.client??this.pool,p);}
   async list(p: Principal, limit = 20, offset = 0) {
     ({limit,offset} = ActivityPageSchema.parse({limit,offset}));
@@ -79,17 +123,42 @@ export class RuntimeStore {
       coalesce((SELECT h.rule_id FROM runtime_policy_holds h JOIN runtime_policy_current c ON c.character_id=h.character_id AND c.version=h.policy_version
         WHERE h.activity_id=runtime_activities.id AND h.activity_version=runtime_activities.version),
         CASE WHEN turns_used>=max_turns AND status IN ('ready','waiting_time','needs_input') THEN 'activity_turn_budget' END) AS blocked_reason,
-      checkpoint_id,question,input_reply,summary,created_at,updated_at FROM runtime_activities
+      checkpoint_id,question,input_reply,summary,created_at,updated_at,
+      (SELECT min(w.available_at) FROM runtime_wakeups w
+        WHERE w.activity_id=runtime_activities.id AND w.state='pending') AS next_wake_at,
+      CASE WHEN origin='self' AND invocation_id LIKE 'minecraft-self:goal:%' THEN
+        (SELECT state FROM runtime_checkpoints WHERE id=runtime_activities.checkpoint_id) END AS minecraft_checkpoint
+      FROM runtime_activities
       WHERE character_id=$1 AND audience_id=$2 ORDER BY created_at DESC,id DESC LIMIT $3 OFFSET $4`, [p.characterId,p.audienceId,limit,offset])).rows;
   }
 
   async inspect(p: Principal, id: string) {
-    return this.transaction(p, async (db) => {
-      const activity = await this.activity(db,p,id);
-      const checkpoint = activity.checkpoint_id ? (await db.query(`SELECT id,state,created_at FROM runtime_checkpoints
-        WHERE id=$1 AND activity_id=$2 AND character_id=$3 AND audience_id=$4`, [activity.checkpoint_id,id,p.characterId,p.audienceId])).rows[0] : null;
-      return { activity, checkpoint };
-    });
+    const db = this.client??this.pool;
+    const activity = (await db.query(`SELECT * FROM runtime_activities
+      WHERE id=$1 AND character_id=$2 AND audience_id=$3`, [id,p.characterId,p.audienceId])).rows[0];
+    if (!activity) throw new DomainError('activity_not_found');
+    const checkpoint = activity.checkpoint_id ? (await db.query(`SELECT id,state,created_at FROM runtime_checkpoints
+      WHERE id=$1 AND activity_id=$2 AND character_id=$3 AND audience_id=$4`, [activity.checkpoint_id,id,p.characterId,p.audienceId])).rows[0] : null;
+    const history = (await db.query(`SELECT created_at, kind, detail FROM (
+      SELECT created_at, 'activity' AS kind, transition AS detail
+        FROM runtime_audit WHERE activity_id=$1
+      UNION ALL
+      SELECT a.created_at, 'review', concat(a.phase, ' · ', a.verdict, ' · ', a.rule_id)
+        FROM runtime_policy_audit a JOIN runtime_turns t ON t.id=a.turn_id
+        WHERE t.activity_id=$1 AND a.character_id=$2 AND a.audience_id=$3
+      UNION ALL
+      SELECT r.created_at, CASE WHEN r.invocation_id LIKE 'initiative:%' THEN 'minecraft_chat' WHEN r.invocation_id LIKE 'house:%' THEN 'minecraft_build' WHEN r.invocation_id LIKE 'activity-tool:%' THEN 'minecraft_tool' ELSE 'minecraft' END, r.state
+        FROM runtime_turns t JOIN minecraft_tool_receipts r
+          ON r.character_id=t.character_id AND (r.invocation_id IN ('activity:'||t.id::text,'initiative:'||t.id::text,'house:'||t.id::text)
+            OR r.invocation_id LIKE 'activity-tool:'||t.id::text||':%')
+        WHERE t.activity_id=$1 AND t.character_id=$2 AND t.audience_id=$3
+    ) entries ORDER BY created_at DESC, kind, detail LIMIT 30`, [id,p.characterId,p.audienceId])).rows;
+    const turns = (await db.query(`SELECT t.id,t.created_at,t.status,g.engine,g.model,g.reserved_tokens,g.observed_tokens,g.usage_source
+      FROM runtime_turns t LEFT JOIN runtime_model_grants g ON g.turn_id=t.id
+        AND g.character_id=t.character_id AND g.audience_id=t.audience_id
+      WHERE t.activity_id=$1 AND t.character_id=$2 AND t.audience_id=$3
+      ORDER BY t.created_at DESC,t.id DESC LIMIT 20`, [id,p.characterId,p.audienceId])).rows;
+    return { activity, checkpoint, history, turns };
   }
 
   async cancel(p: Principal, id: string, version: number) {
@@ -152,10 +221,12 @@ export class RuntimeStore {
     const c=(await this.pool.query('SELECT * FROM characters WHERE id=$1',[p.characterId])).rows[0];
     if(!c||c.paused||(c.lease_until&&new Date(c.lease_until).getTime()>Date.now()))return null;
     const a=(await this.pool.query(`SELECT a.*,w.kind AS wake_reason FROM runtime_activities a JOIN runtime_wakeups w ON w.activity_id=a.id
-      WHERE a.character_id=$1 AND a.audience_id=$2 AND a.status IN ('ready','waiting_time') AND a.turns_used<a.max_turns AND (a.origin='owner' OR EXISTS(SELECT 1 FROM runtime_autonomy ra JOIN telegram_bindings rb ON rb.id=ra.binding_id WHERE rb.character_id=a.character_id AND rb.audience_id=a.audience_id AND rb.enabled AND ra.enabled))
+      WHERE a.character_id=$1 AND a.audience_id=$2 AND a.status IN ('ready','waiting_time') AND (a.max_turns IS NULL OR a.turns_used<a.max_turns) AND (a.origin='owner' OR ($4::boolean AND a.origin='self' AND a.invocation_id LIKE 'minecraft-self:%'
+          AND EXISTS(SELECT 1 FROM world_observations o WHERE o.character_id=a.character_id AND o.audience_id=a.audience_id
+            AND o.connected AND o.received_at>clock_timestamp()-interval '2500 milliseconds')) OR EXISTS(SELECT 1 FROM runtime_autonomy ra JOIN telegram_bindings rb ON rb.id=ra.binding_id WHERE rb.character_id=a.character_id AND rb.audience_id=a.audience_id AND rb.enabled AND ra.enabled))
       AND w.state='pending' AND w.available_at<=clock_timestamp()
       AND NOT EXISTS(SELECT 1 FROM runtime_policy_holds h WHERE h.activity_id=a.id AND h.activity_version=a.version AND h.policy_version=$3)
-      ORDER BY w.available_at,w.id LIMIT 1`,[p.characterId,p.audienceId,policyVersion])).rows[0];
+      ORDER BY (a.create_payload->>'minecraft_goal'='wooden_house') DESC NULLS LAST,w.available_at,w.id LIMIT 1`,[p.characterId,p.audienceId,policyVersion,this.minecraftAutonomy])).rows[0];
     if(!a)return null;
     const checkpoint=a.checkpoint_id?(await this.pool.query('SELECT state FROM runtime_checkpoints WHERE id=$1',[a.checkpoint_id])).rows[0].state:null;
     return {activity:a,checkpoint,persona:c.persona,wake_reason:a.wake_reason,context:await this.desk(p)};
@@ -172,14 +243,21 @@ export class RuntimeStore {
         return this.claimResult(db,p,old);
       }
       if (state.lease_until && new Date(state.lease_until) > new Date(state.db_now)) return { work:null, reason:'busy' };
-      const daily = (await db.query(`SELECT count(*)::int AS n FROM runtime_turns WHERE character_id=$1 AND created_at>clock_timestamp()-interval '24 hours'`,[p.characterId])).rows[0].n;
-      if (daily >= 100) return { work:null, reason:'character_turn_budget' };
       const due = (await db.query(`SELECT a.*,w.id AS wakeup_id FROM runtime_activities a JOIN runtime_wakeups w ON w.activity_id=a.id
         WHERE a.character_id=$1 AND a.audience_id=$2 AND a.status IN ('ready','waiting_time')
-        AND a.turns_used<a.max_turns AND (a.origin='owner' OR EXISTS(SELECT 1 FROM runtime_autonomy ra JOIN telegram_bindings rb ON rb.id=ra.binding_id WHERE rb.character_id=a.character_id AND rb.audience_id=a.audience_id AND rb.enabled AND ra.enabled)) AND w.state='pending' AND w.available_at<=clock_timestamp()
+        AND (a.max_turns IS NULL OR a.turns_used<a.max_turns) AND (a.origin='owner' OR ($4::boolean AND a.origin='self' AND a.invocation_id LIKE 'minecraft-self:%'
+          AND EXISTS(SELECT 1 FROM world_observations o WHERE o.character_id=a.character_id AND o.audience_id=a.audience_id
+            AND o.connected AND o.received_at>clock_timestamp()-interval '2500 milliseconds')) OR EXISTS(SELECT 1 FROM runtime_autonomy ra JOIN telegram_bindings rb ON rb.id=ra.binding_id WHERE rb.character_id=a.character_id AND rb.audience_id=a.audience_id AND rb.enabled AND ra.enabled)) AND w.state='pending' AND w.available_at<=clock_timestamp()
         AND NOT EXISTS(SELECT 1 FROM runtime_policy_holds h WHERE h.activity_id=a.id AND h.activity_version=a.version AND ($3::text IS NULL OR h.policy_version=$3))
-        ORDER BY w.available_at,w.id LIMIT 1 FOR UPDATE OF a,w`,[p.characterId,p.audienceId,approved?.profile.version??null])).rows[0];
+        ORDER BY (a.create_payload->>'minecraft_goal'='wooden_house') DESC NULLS LAST,w.available_at,w.id LIMIT 1 FOR UPDATE OF a,w`,[p.characterId,p.audienceId,approved?.profile.version??null,this.minecraftAutonomy])).rows[0];
       if (!due) return { work:null, reason:'idle_or_budget_blocked' };
+      if(due.max_turns!==null){
+        const daily=(await db.query(`SELECT count(*)::int AS n FROM runtime_turns t
+          JOIN runtime_activities a ON a.id=t.activity_id
+          WHERE t.character_id=$1 AND t.created_at>clock_timestamp()-interval '24 hours'
+            AND a.max_turns IS NOT NULL`,[p.characterId])).rows[0].n;
+        if(daily>=100)return {work:null,reason:'character_turn_budget'};
+      }
       if(approved){
         const checkpoint=due.checkpoint_id?(await db.query('SELECT state FROM runtime_checkpoints WHERE id=$1',[due.checkpoint_id])).rows[0].state:null;
         if(approved.input.desk&&deskFingerprint(await deskContext(db,p))!==deskFingerprint(approved.input))return {work:null,reason:'runtime_context_changed'};
@@ -238,8 +316,9 @@ export class RuntimeStore {
       if (turn.status !== 'running' || state.active_runtime_turn_id !== turn.id || state.active_event_id) throw new DomainError('turn_not_current');
       if (new Date(turn.lease_until) <= new Date(state.db_now) || !state.lease_until || new Date(state.lease_until) <= new Date(state.db_now)) throw new DomainError('lease_expired');
       const a = await this.activity(db,p,turn.activity_id);
+      const gameGoal=a.origin==='self'&&a.invocation_id.startsWith('minecraft-self:goal:');
       if (a.version !== b.expected_version) throw new DomainError('activity_version_conflict');
-      if (b.decision.action === 'wait_until' && new Date(b.decision.at).getTime() < new Date(state.db_now).getTime()+60_000) throw new DomainError('wakeup_too_soon');
+      if (b.decision.action === 'wait_until' && new Date(b.decision.at).getTime() < new Date(state.db_now).getTime()+(gameGoal?10_000:60_000)) throw new DomainError('wakeup_too_soon');
       if(approved)await assertDecisionGrant(db,p,turn,b,approved,false);
       await commitDesk(db,p,b,a,!!approved,state);
       const checkpointId = randomUUID();
@@ -247,8 +326,8 @@ export class RuntimeStore {
       const status = {continue:'ready',wait_until:'waiting_time',request_input:'needs_input',complete:'completed'}[b.decision.action];
       const result = (await db.query(`UPDATE runtime_activities SET status=$2,checkpoint_id=$3,question=$4,summary=$5,input_reply=NULL,version=version+1,updated_at=now() WHERE id=$1 RETURNING *`,
         [a.id,status,checkpointId,b.decision.action==='request_input'?b.decision.question:null,b.decision.action==='complete'?b.decision.summary:null])).rows[0];
-      if (b.decision.action==='continue' || b.decision.action==='wait_until') {
-        const at = b.decision.action==='wait_until'?new Date(b.decision.at):new Date(new Date(state.db_now).getTime()+60_000);
+      if (status==='ready'||status==='waiting_time') {
+        const at = b.decision.action==='wait_until'?new Date(b.decision.at):new Date(new Date(state.db_now).getTime()+(gameGoal?10_000:60_000));
         await this.wake(db,p,a.id,`decision:${turn.id}`,b.decision.action==='continue'?'continue':'at_time',at);
       }
       await db.query(`UPDATE runtime_turns SET status='finished',finished_at=now() WHERE id=$1`,[turn.id]);

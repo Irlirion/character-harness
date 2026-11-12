@@ -57,7 +57,7 @@ while(!stopped){
   let finishDecision:TurnFinishDecision|undefined;
   try{
    const input=await api('/engine/input');engineState='ready';engineErrorCode=null;if(!input.event){
-    if(runtime){engineState='busy';void sendHeartbeat().catch(()=>{});try{await runtime.tick((context,persona,signal,onUsage)=>runCodexPlanning(rpc,cwd,selected.model??selected.id,context,persona,signal,onUsage),runtimeStop.signal);}finally{engineState='ready';}}
+    if(runtime){engineState='busy';void sendHeartbeat().catch(()=>{});try{await runtime.tick((context,persona,signal,onUsage,game)=>runCodexPlanning(rpc,cwd,selected.model??selected.id,context,persona,signal,onUsage,process.env.RUNTIME_MINECRAFT_ENABLED==='true'?game:undefined),runtimeStop.signal);}finally{engineState='ready';}}
     await sleep(1000);continue;
    }
    engineState='busy';void sendHeartbeat().catch(()=>{});

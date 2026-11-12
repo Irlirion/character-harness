@@ -10,8 +10,9 @@
     main{max-width:1180px;margin:0 auto;padding:34px 22px 70px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:26px}.eyebrow{color:var(--blue);font-size:12px;text-transform:uppercase;letter-spacing:.13em;font-weight:700}h1{font-size:30px;margin:4px 0 2px;letter-spacing:-.04em}.sub{color:var(--muted)}
     .connect{display:flex;gap:8px;align-items:center}.connect input{width:260px;max-width:42vw;background:#0e1628;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px 12px}.connect button{background:#b9d0ff;color:#0b1020;border:0;border-radius:10px;padding:11px 15px;font-weight:700;cursor:pointer}.meta{color:var(--muted);font-size:12px;margin:8px 0 20px}
     .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{background:linear-gradient(160deg,#172239,#111a2c);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0 0 12px}.value{font-size:19px;font-weight:700;overflow-wrap:anywhere}.small{font-size:13px;color:var(--muted);margin-top:5px;overflow-wrap:anywhere}.wide{grid-column:span 2}.full{grid-column:1/-1}.status{display:inline-flex;align-items:center;gap:8px}.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 12px currentColor}.ok .dot{background:var(--green);color:var(--green)}.warn .dot{background:var(--amber);color:var(--amber)}.bad .dot{background:var(--red);color:var(--red)}.unknown .dot{background:#74839d;color:#74839d}
-    .activity{font-size:21px;line-height:1.35;font-weight:650}.event{white-space:pre-wrap;overflow-wrap:anywhere}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.chip{background:#0b1425;border:1px solid var(--line);border-radius:999px;color:#c2cee3;padding:4px 9px;font-size:12px}.notice{margin-top:18px;border-left:3px solid var(--amber);padding:10px 13px;background:#191b25;color:#c8d0df;font-size:13px}.error{color:var(--red)}.hidden{display:none!important}
+    .activity{font-size:21px;line-height:1.35;font-weight:650}#activity-select{max-width:100%;margin-block:10px}.event{white-space:pre-wrap;overflow-wrap:anywhere}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.chip{background:#0b1425;border:1px solid var(--line);border-radius:999px;color:#c2cee3;padding:4px 9px;font-size:12px}.notice{margin-top:18px;border-left:3px solid var(--amber);padding:10px 13px;background:#191b25;color:#c8d0df;font-size:13px}.error{color:var(--red)}.hidden{display:none!important}
     .control{margin-top:13px;border:0;border-radius:9px;padding:10px 13px;font:inherit;font-size:13px;font-weight:700;cursor:pointer}.control.pause{background:#5b2634;color:#ffe3e8}.control.resume{background:#16553f;color:#ddffef}.control:disabled{opacity:.55;cursor:wait}.control-detail{min-height:1.4em}
+    .messages{list-style:none;padding:0;margin:0;max-height:380px;overflow:auto}.messages li{padding:10px 0;border-top:1px solid var(--line)}.message-reply{margin-top:6px;color:#c8dcff}.chat-form{display:grid;gap:8px;margin-top:12px}.chat-form textarea{width:100%;resize:vertical;background:#0e1628;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px;font:inherit}.chat-form button{justify-self:start;margin:0;background:#b9d0ff;color:#0b1020}
     @media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}.top{display:block}.connect{margin-top:18px}}@media(max-width:560px){main{padding:22px 14px}.grid{grid-template-columns:1fr}.wide,.full{grid-column:auto}.connect input{width:100%;max-width:none}.connect{align-items:stretch}.connect button{flex:none}}
   </style>
 </head>
@@ -27,11 +28,35 @@
     <article class="card"><h2>UnionClef MCP</h2><div id="minecraft" class="value">—</div><div class="small" id="minecraft-detail">—</div></article>
     <article class="card"><h2>Игровой чат и голос</h2><div id="game-bridge" class="value">—</div><div class="small" id="game-bridge-detail">—</div></article>
     <article class="card"><h2>Движок и голос</h2><div id="engine" class="value">—</div><div class="small" id="engine-detail">—</div></article>
-    <article class="card wide"><h2>Сейчас занимается</h2><div class="activity" id="doing">Нет активной задачи</div><div class="small" id="doing-detail">—</div></article>
+    <article class="card wide"><h2>Сейчас занимается</h2><div class="activity" id="doing">Нет активной задачи</div><div class="small" id="doing-detail">—</div><div class="small" id="doing-next" role="status"></div></article>
     <article class="card"><h2>Очередь событий</h2><div class="value" id="pending">—</div><div class="small" id="processed">—</div></article>
-    <article class="card"><h2>Задачи runtime</h2><div class="value" id="activities">—</div><div class="small" id="activity-detail">—</div></article>
+    <article class="card"><h2>Лимиты автономности</h2><div class="value" id="budget-status">—</div><div class="small" id="budget-tokens">—</div><div class="small" id="budget-dispatches">—</div><div class="small" id="budget-next"></div></article>
+    <article class="card full"><h2>Цели Лады</h2><div class="small" id="activities">—</div>
+      <label for="activity-select">Задача</label> <select id="activity-select" disabled></select>
+      <button type="button" id="activity-prev" disabled>Новее</button>
+      <button type="button" id="activity-next" disabled>Старее</button>
+      <div class="event" id="activity-detail">—</div>
+      <ol id="activity-steps"></ol>
+      <form class="chat-form hidden" id="activity-input">
+        <textarea id="activity-answer" aria-label="Ответ на вопрос Лады" rows="2" maxlength="4000" required></textarea>
+        <button class="control" id="activity-send">Ответить Ладе</button>
+      </form>
+      <button class="control pause hidden" id="activity-cancel">Отменить цель</button>
+      <button class="control resume hidden" id="activity-retry">Повторить проверку</button>
+      <div class="small" id="activity-feedback" role="status"></div>
+      <details><summary>История действий и проверок</summary><ul class="messages" id="activity-history"></ul></details>
+      <details><summary>Токены по ходам задачи</summary><ul class="messages" id="activity-turns"></ul></details>
+    </article>
     <article class="card"><h2>Мир Minecraft</h2><div class="value" id="world">—</div><div class="small" id="position">—</div></article>
     <article class="card"><h2>Telegram</h2><div class="value" id="telegram">—</div><div class="small" id="telegram-detail">—</div></article>
+    <article class="card wide"><h2>Чат с Ладой</h2><ul class="messages" id="owner-chat"></ul>
+      <form class="chat-form" id="chat-form">
+        <textarea id="chat-text" aria-label="Сообщение Ладе" placeholder="Напишите Ладе команду или вопрос" rows="3" maxlength="4000" required></textarea>
+        <button class="control" id="chat-send" disabled>Отправить</button>
+      </form>
+      <div class="small" id="chat-feedback" role="status">Подключите панель, чтобы отправить сообщение.</div>
+    </article>
+    <article class="card wide"><h2>Поток сообщений агента</h2><div class="small" id="shadow-status">—</div><ul class="messages" id="agent-feed"></ul></article>
     <article class="card full"><h2>Событие в обработке</h2><div class="event" id="event">—</div><div class="chips" id="event-tags"></div></article>
   </section>
   <div class="notice">UnionClef управляет персонажем в мире. Fabric companion передаёт игровой чат и голосовые транскрипты в Core только с разрешённого сервера и привязывает их к текущей сессии. Звуковой ответ зависит от готовности TTS и выбранного микрофонного устройства Simple Voice Chat.</div>
@@ -46,34 +71,318 @@
   const state=(value)=>{const s=String(value||'unknown');const cls=['ok','connected','ready','active','true','configured','busy'].includes(s)?'ok':['stale','disconnected','paused','not_configured','not_observed','worker_heartbeat_unavailable','unknown','starting','stopping','not_in_game','unreachable'].includes(s)?'warn':['auth_required','error','failed','false','degraded'].includes(s)?'bad':'unknown';return `<span class="status ${cls}"><i class="dot"></i>${labels[s]||s}</span>`};
   const heartbeatDetail=w=>!w?.last_seen_at?'нет heartbeat':!w.fresh?`сигнал устарел · ${Math.round(w.age_ms/1000)} с назад`:`${labels[w.state]||w.state} · ${Math.round(w.age_ms/1000)} с назад${w.error_code?` · ${w.error_code}`:''}`;
   async function get(path){const r=await fetch(path,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'});if(!r.ok)throw new Error(r.status===401?'Токен владельца не принят':`Ошибка API: ${r.status}`);return r.json()}
-  async function post(path){const r=await fetch(path,{method:'POST',headers:{Authorization:`Bearer ${token}`},cache:'no-store'});if(!r.ok)throw new Error(r.status===401?'Токен владельца не принят':`Ошибка API: ${r.status}`);return r.json()}
-  function paintControl(value){paused=typeof value==='boolean'?value:null;const button=$('character-toggle');button.disabled=!token||paused===null||controlBusy;button.className=`control ${paused?'resume':'pause'}`;button.textContent=paused?'Возобновить персонажа':'Поставить на паузу';set('control-detail',paused?'Пауза блокирует новые ходы и сбрасывает активную задачу.':'Персонаж активен; пауза остановит новые ходы и сбросит активную задачу.')}
+  async function post(path,body){const r=await fetch(path,{method:'POST',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'});if(!r.ok){const failure=await r.json().catch(()=>null);throw new Error(failure?.error||`Ошибка API: ${r.status}`)}return r.json()}
+  function paintControl(value){paused=typeof value==='boolean'?value:null;const button=$('character-toggle');button.disabled=!token||paused===null||controlBusy;button.className=`control ${paused?'resume':'pause'}`;button.textContent=paused?'Возобновить персонажа':'Поставить на паузу';$('control-detail').classList.remove('error');set('control-detail',paused===null?'Состояние персонажа недоступно.':paused?'Пауза блокирует новые ходы и сбрасывает активную задачу.':'Персонаж активен; пауза остановит новые ходы и сбросит активную задачу.')}
   async function togglePause(){if(paused===null||controlBusy)return;const nextPaused=!paused;controlBusy=true;paintControl(paused);$('character-toggle').disabled=true;set('control-detail',nextPaused?'Ставлю персонажа на паузу…':'Возобновляю персонажа…');try{const result=await post(nextPaused?'/owner/pause':'/owner/resume');paused=typeof result.paused==='boolean'?result.paused:nextPaused;set('character-state',paused?`Пауза включена · epoch ${result.epoch??'—'}`:`Работает · epoch ${result.epoch??'—'}`);await refresh()}catch(err){set('control-detail',`Не удалось изменить состояние: ${err.message}`);$('control-detail').classList.add('error')}finally{controlBusy=false;const button=$('character-toggle');button.disabled=!token||paused===null;button.className=`control ${paused?'resume':'pause'}`;button.textContent=paused?'Возобновить персонажа':'Поставить на паузу'}}
-  async function refresh(){if(!token)return;try{
-    const [o,s,activityPage]=await Promise.all([get('/owner/overview'),get('/owner/status'),get('/owner/activities?limit=5&offset=0').catch(()=>null)]);
-    set('connection','Подключено');set('updated',` · обновлено ${new Date(o.generated_at).toLocaleTimeString('ru-RU')}`);
+  const messageStatus={answered:'Есть ответ',closed:'Завершено без ответа',active:'В работе',failed:'Попытки исчерпаны',queued:'В очереди'};
+  const messageSource={minecraft_voice_stt:'Голос Minecraft',fabric_profile_context:'Чат Minecraft',minecraft_system_chat:'Чат Minecraft',telegram:'Telegram',owner_input:'Владелец'};
+  function paintMessages(id,rows,privateChat){
+    const list=$(id);
+    const items=rows.map(row=>{
+      const item=document.createElement('li');
+      const meta=document.createElement('div');
+      meta.className='small';
+      const source=privateChat?'Вы':messageSource[row.author_provenance]||row.channel;
+      meta.textContent=`${source} · ${stamp(row.created_at)} · ${messageStatus[row.status]||row.status}`;
+      const input=document.createElement('div');
+      input.className='event';
+      input.textContent=row.text;
+      item.append(meta,input);
+      if(row.shadow_decision){
+        const decisions={silence:'Промолчать',quick_reply:'Быстрый ответ',known_skill:'Знакомый навык',delegate:'Передать медленному контуру'};
+        const shadow=document.createElement('div');
+        shadow.className='small';
+        shadow.textContent=`Тень · ${row.shadow_model} · ${decisions[row.shadow_decision]} · ${row.shadow_reason} · ${row.shadow_latency_ms} мс`;
+        item.append(shadow);
+        if(row.shadow_scores){
+          const scores=document.createElement('div');
+          scores.className='small';
+          scores.textContent=Object.entries(row.shadow_scores)
+            .map(([route,score])=>`${decisions[route]} ${Math.round(score*100)}%`).join(' · ');
+          item.append(scores);
+        }
+      }
+      if(row.reply){
+        const reply=document.createElement('div');
+        reply.className='event message-reply';
+        reply.textContent=`Лада: ${row.reply}`;
+        item.append(reply);
+      }
+      return item;
+    });
+    if(!items.length){
+      const empty=document.createElement('li');
+      empty.className='small';
+      empty.textContent='Сообщений пока нет.';
+      items.push(empty);
+    }
+    list.replaceChildren(...items);
+  }
+  let chatBusy=false, chatRequest=null, refreshVersion=0;
+  $('chat-form').addEventListener('submit',async event=>{
+    event.preventDefault();
+    const input=$('chat-text'), text=input.value.trim();
+    if(!text||chatBusy||$('chat-send').disabled)return;
+    if(chatRequest?.text!==text)chatRequest={text,request_id:crypto.randomUUID()};
+    chatBusy=true;
+    $('chat-send').disabled=true;
+    input.readOnly=true;
+    try{
+      await post('/owner/chat',chatRequest);
+      input.value='';
+      chatRequest=null;
+      set('chat-feedback',paused?'Сообщение в очереди. Лада возьмёт его после снятия паузы.':'Сообщение в очереди.');
+    }catch(error){
+      set('chat-feedback',`Не удалось подтвердить отправку. ${error.message}`);
+    }finally{
+      chatBusy=false;
+      input.readOnly=false;
+      await refresh();
+    }
+  });
+  const terminal=new Set(['completed','failed','cancelled']);
+  const activityStatus={ready:'В очереди',running:'В работе',waiting_time:'Ждёт следующего хода',needs_input:'Ждёт ответа',completed:'Завершена',failed:'Сбой',cancelled:'Отменена'};
+  const pageSize=15;
+  let offset=0, page=[], selectedId=null, reviews=null, activityDetail=null, detailVersion=0, activityBusy=false;
+  let overview=null, status=null, runtimePolicy=null, latestOpen=[];
+  function minecraftPlan(state){
+    try{const p=JSON.parse(state);return p&&Array.isArray(p.steps)&&Number.isInteger(p.completed)?p:null}catch{return null}
+  }
+  function goalReason(a){
+    const p=runtimePolicy?.resources;
+    const review=reviews?.find(r=>r.activity_id===a?.id&&r.activity_version===a.version);
+    if(paused)return 'Снимите паузу, чтобы разрешить новые ходы.';
+    if(!overview)return 'Обзор недоступен. Состояние персонажа уточняется.';
+    if(a?.status==='running')return 'Лада выполняет ход.';
+    if(a?.blocked_reason==='activity_turn_budget')return 'Лимит ходов задачи исчерпан. Откройте историю, чтобы посмотреть прогресс.';
+    if(review)return review.verdict==='needs_review'
+      ? `Проверка удерживает ход · ${review.rule_id}. Повторную проверку можно запустить в карточке цели.`
+      : `Проверка отклонила ход · ${review.rule_id}.`;
+    if(a?.blocked_reason)return `Ход заблокирован правилом · ${a.blocked_reason}.`;
+    if(a?.status==='needs_input')return 'Ответьте на вопрос в карточке цели.';
+    const blockers=[];
+    if(a?.max_turns!=null&&p&&!p.allowed){
+      const limits=[];
+      if(p.tokens+p.next_turn_reservation>p.token_limit)limits.push('токены');
+      if(p.dispatches>=p.dispatch_limit)limits.push('запуски');
+      blockers.push(`Лимит автономности · ${limits.join(' и ')}${p.next_dispatch_at?` · следующее окно ${stamp(p.next_dispatch_at)}`:''}`);
+    }
+    if(status?.runtime?.autonomous_execution===false)blockers.push('Автономные ходы выключены');
+    if((!a||a.origin==='self')&&overview&&(!overview.world?.connected||overview.world?.stale))blockers.push('Minecraft недоступен. Проверьте подключение UnionClef');
+    if(blockers.length)return blockers.join(' · ');
+    if(a?.next_wake_at&&new Date(a.next_wake_at)>new Date()){
+      let reason;
+      try{reason=JSON.parse(a.minecraft_checkpoint)?.deferred_reason}catch{}
+      return reason?`Лада отложила старт до ${stamp(a.next_wake_at)}. ${reason}`:`Следующий ход запланирован на ${stamp(a.next_wake_at)}.`;
+    }
+    return a?'Ждёт запуска следующего хода.':overview?'Ожидает событие или новую автономную цель.':'Состояние персонажа уточняется.';
+  }
+  function paintGoal(){
+    const running=overview?.character?.active_activity;
+    const a=running||latestOpen.find(x=>!terminal.has(x.status));
+    const e=overview?.character?.active_event;
+    const plan=minecraftPlan(latestOpen.find(x=>x.id===a?.id)?.minecraft_checkpoint);
+    set('doing',e&&!running?`Обрабатывает сообщение в ${e.channel}`:plan?.goal||a?.objective||(paused?'Персонаж на паузе':'Нет активной цели'));
+    set('doing-detail',a?`${activityStatus[a.status]||a.status} · ход ${a.turns_used}${a.max_turns==null?'':`/${a.max_turns}`}${plan?` · шаги ${plan.completed}/${plan.steps.length}`:''}`:e?`Событие принято ${stamp(e.created_at)}`:'—');
+    set('doing-next',e&&!running?'Лада отвечает на входящее сообщение.':goalReason(a));
+  }
+  function paintRows(id,rows,empty){
+    $(id).replaceChildren(...(rows.length?rows:[empty]).map(text=>{
+      const li=document.createElement('li');
+      li.textContent=text;
+      return li;
+    }));
+  }
+  function paintActivity(){
+    const detail=activityDetail;
+    const a=detail?.activity;
+    const review=reviews?.find(r=>r.activity_id===a?.id&&r.activity_version===a.version&&r.verdict==='needs_review');
+    const plan=minecraftPlan(detail?.checkpoint?.state);
+    set('activity-detail',a?[a.objective,a.question,a.summary,plan?.observation,!terminal.has(a.status)?goalReason({...a, ...page.find(row=>row.id===a.id&&row.version===a.version)}):null].filter(Boolean).join('\n'):selectedId?'Загружаю задачу…':'Выберите задачу.');
+    paintRows('activity-steps',plan?plan.steps.map((step,i)=>{
+      const criterion=plan.criteria?.[i];
+      const condition=criterion?.kind==='arrival'
+        ? `прибыть в (${criterion.x}, ${criterion.y}, ${criterion.z}) с отклонением менее 1,5 блока и подтверждённым перемещением`
+        : criterion?.kind==='grounded'? `стоять на земле с HP ≥ ${criterion.min_health}`
+        :criterion?.kind==='house'? `${(criterion.size==='7x5'
+          ? {floor:'35 дубовых досок пола',walls:'54 доски стен, свободный вход и четыре оконных проёма',roof:'35 досок крыши и целый дом 7×5'}
+          : {floor:'9 дубовых досок пола',walls:'14 досок стен и свободный вход',roof:'9 досок крыши и целый дом'})[criterion.phase]} у (${criterion.x}, ${criterion.y}, ${criterion.z})`:'';
+      return `${i<plan.completed?'Подтверждено':i===plan.completed?'Ожидает подтверждения':'Запланировано'} · ${step}${condition?` · Условие: ${condition}`:''}`;
+    }):[], 'Пошаговый план пока отсутствует.');
+    $('activity-input').classList.toggle('hidden',a?.status!=='needs_input');
+    $('activity-cancel').classList.toggle('hidden',!a||terminal.has(a.status));
+    $('activity-retry').classList.toggle('hidden',!review);
+    $('activity-send').disabled=activityBusy||paused!==false;
+    $('activity-cancel').disabled=activityBusy;
+    $('activity-retry').disabled=activityBusy;
+    const history=(detail?.history||[]).map(r=>`${stamp(r.created_at)} · ${{activity:'Задача',review:'Политика',minecraft:'Minecraft · запрос навигации',minecraft_chat:'Minecraft · самостоятельная реплика',minecraft_build:'Minecraft · очередь строительства',minecraft_tool:'Minecraft · вызов UnionClef'}[r.kind]} · ${r.detail}`);
+    paintRows('activity-history',history,'Действий пока нет.');
+    const turns=(detail?.turns||[]).map(t=>`${stamp(t.created_at)} · ${t.status} · ${t.model||'без модели'} · расход ${t.observed_tokens??'не измерен'} · резерв ${t.reserved_tokens??'—'}${t.usage_source?` · ${t.usage_source}`:''}`);
+    paintRows('activity-turns',turns,'Ходов пока нет.');
+  }
+  async function loadActivity(){
+    if(!selectedId||activityBusy)return;
+    const version=++detailVersion;
+    try{
+      const detail=await get(`/owner/activities/${selectedId}`);
+      if(version!==detailVersion)return;
+      activityDetail=detail;
+      paintActivity();
+    }catch(error){
+      if(version!==detailVersion)return;
+      activityDetail=null;
+      paintActivity();
+      set('activity-detail',`История задачи недоступна · ${error.message}`);
+    }
+  }
+  function paintPage(data){
+    page=data.activities;
+    if(!page.some(a=>a.id===selectedId)){
+      detailVersion++;
+      activityDetail=null;
+      selectedId=page.find(a=>!terminal.has(a.status))?.id||page[0]?.id||null;
+      $('activity-answer').value='';
+      paintActivity();
+    }
+    const select=$('activity-select');
+    select.replaceChildren(...page.map(a=>{
+      const option=document.createElement('option');
+      option.value=a.id;
+      option.textContent=`${activityStatus[a.status]||a.status} · ${minecraftPlan(a.minecraft_checkpoint)?.goal||a.objective} · ${stamp(a.created_at)}`;
+      return option;
+    }));
+    select.value=selectedId||'';
+    select.disabled=page.length===0;
+    $('activity-prev').disabled=offset===0;
+    $('activity-next').disabled=page.length<pageSize;
+    set('activities',page.length?`Задачи ${offset+1}–${offset+page.length}`:'На этой странице задач нет.');
+    return loadActivity();
+  }
+  $('activity-select').addEventListener('change',()=>{
+    selectedId=$('activity-select').value;
+    activityDetail=null;
+    $('activity-answer').value='';
+    set('activity-feedback','');
+    paintActivity();
+    loadActivity();
+  });
+  $('activity-prev').addEventListener('click',()=>{offset=Math.max(0,offset-pageSize);refresh()});
+  $('activity-next').addEventListener('click',()=>{offset+=pageSize;refresh()});
+  async function activityAction(kind){
+    const a=activityDetail?.activity;
+    if(!a||activityBusy)return;
+    const answer=$('activity-answer').value.trim();
+    let path=`/owner/activities/${a.id}/${kind}`;
+    let body={expected_version:a.version};
+    if(kind==='input'){
+      if(!answer)return;
+      body.text=answer;
+    }
+    if(kind==='cancel'&&!confirm('Отменить эту цель?'))return;
+    if(kind==='retry'){
+      const r=reviews?.find(r=>r.activity_id===a.id&&r.activity_version===a.version&&r.verdict==='needs_review');
+      if(!r)return;
+      path='/owner/runtime-reviews/retry';
+      body={request_id:crypto.randomUUID(),activity_id:a.id,activity_version:a.version,policy_version:r.policy_version,payload_hash:r.payload_hash};
+    }
+    activityBusy=true;
+    detailVersion++;
+    paintActivity();
+    try{
+      await post(path,body);
+      if(kind==='input'&&selectedId===a.id)$('activity-answer').value='';
+      set('activity-feedback',{input:'Ответ принят.',cancel:'Цель отменена.',retry:'Цель поставлена на повторную проверку.'}[kind]);
+    }catch(error){
+      set('activity-feedback',`Действие не подтверждено · ${error.message}`);
+    }finally{
+      activityBusy=false;
+      await refresh();
+      paintActivity();
+    }
+  }
+  $('activity-input').addEventListener('submit',event=>{event.preventDefault();activityAction('input')});
+  $('activity-cancel').addEventListener('click',()=>activityAction('cancel'));
+  $('activity-retry').addEventListener('click',()=>activityAction('retry'));
+  function paintOverview(o,s){
+    set('updated',` · обновлено ${new Date(o.generated_at).toLocaleTimeString('ru-RU')}`);
     set('character',o.character?.name||o.character?.id||'—');set('character-state',o.character?.paused?'Пауза включена':`Работает · epoch ${o.character?.epoch}`);paintControl(o.character?.paused);
-    $('core').innerHTML=state(o.signals?.core);set('core-detail',`PostgreSQL: ${o.signals?.database||'unknown'} · runtime ${s.runtime?.storage_enabled?'включён':'выключен'}`);
+    $('core').innerHTML=state(o.signals?.core);set('core-detail',`PostgreSQL: ${o.signals?.database||'unknown'} · runtime ${s?.runtime?.storage_enabled==null?'нет данных':s.runtime.storage_enabled?'включён':'выключен'}`);
     $('minecraft').innerHTML=state(o.signals?.minecraft);set('minecraft-detail',o.world?.configured?`${o.world.tool_count??'—'} MCP-инструментов · ${o.world.self?.dimension||'мир не открыт'} · сервер и переподключение не подтверждаются`:'UnionClef MCP не настроен');
     $('game-bridge').innerHTML=state(o.signals?.bridge);const features=o.bridge?.snapshot?.features;const clientFresh=!!o.bridge?.available&&!o.bridge?.stale&&!!o.bridge?.connected;const voiceIngress=!clientFresh?'нет сигнала клиента':!features?'нет данных о голосе':!features.voice_stt_enabled?'STT выключен':!features.voicechat_available?'Simple Voice Chat не найден':!features.stt_ready?'STT не готов':'STT готов';const chatIngress=clientFresh?(features?.chat_ingress?'включён':'выключен'):'нет сигнала клиента';const bridgeAge=Number(o.bridge?.age_ms);const bridgeAgeLabel=Number.isFinite(bridgeAge)&&bridgeAge<=60000?` · ${Math.round(bridgeAge/1000)} с назад`:o.bridge?.available?' · последний сигнал устарел':'';set('game-bridge-detail',`Чат: ${chatIngress} · голос: ${voiceIngress}${bridgeAgeLabel}`);
-    $('engine').innerHTML=state(o.signals?.engine);set('engine-detail',`Engine: ${heartbeatDetail(o.workers?.engine)} · runtime protocol: ${s.runtime?.protocol_enabled?'включён':'выключен'}`);
-    const a=o.character?.active_activity,e=o.character?.active_event;
-    set('doing',a?.objective|| (e?`Обрабатывает сообщение в ${e.channel}`:o.character?.paused?'Персонаж на паузе':'Нет активной задачи'));
-    set('doing-detail',a?`${a.status} · ход ${a.turns_used}/${a.max_turns}${a.question?` · ждёт ответ: ${a.question}`:''}`:e?`Событие принято ${stamp(e.created_at)} · ${e.text}`:o.character?.paused?'Обработка приостановлена':'Движок запущен и ожидает событие.');
+    $('engine').innerHTML=state(o.signals?.engine);
     set('pending',o.queue?.pending_events??0);set('processed',`Обработано событий: ${o.queue?.processed_events??0}`);
-    const activities=activityPage?.activities||[];const activeCount=activities.filter(x=>!['completed','failed','cancelled'].includes(x.status)).length;
-    set('activities',activityPage?`${activeCount} активных · ${activities.length} последних`:'выключены');
-    set('activity-detail',activities[0]?`${activities[0].status} · ${activities[0].objective}`:'Нет сохранённых задач');
     $('world').innerHTML=state(o.world?.state||'not_configured');
     set('position',o.world?.self?`${o.world.self.dimension||'мир'} · ${o.world.self.pos||'позиция неизвестна'} · игроков рядом: ${o.world.player_count??'—'} · HP ${o.world.self.hp??'—'}`:'Мир недоступен');
-    set('engine-detail',`Движок: ${heartbeatDetail(o.workers?.engine)} · audio worker: ${heartbeatDetail(o.workers?.audio)} · Qwen TTS: ${heartbeatDetail(o.workers?.tts)} · runtime protocol: ${s.runtime?.protocol_enabled?'включён':'выключен'}`);
-    const tg=s.adapters?.telegram; const accounts=typeof tg==='object'?(tg.accounts||[]):[];const bindings=typeof tg==='object'?(tg.bindings||[]):[];const deliveries=typeof tg==='object'?(tg.deliveries||[]):[];
-    $('telegram').innerHTML=state(accounts[0]?.status|| (accounts.length?'configured':'not_configured'));set('telegram-detail',`${bindings.length} привязок · ${deliveries.filter(x=>['pending','retry_wait'].includes(x.state)).length} доставок в очереди`);
+    set('engine-detail',`Движок: ${heartbeatDetail(o.workers?.engine)} · audio worker: ${heartbeatDetail(o.workers?.audio)} · Qwen TTS: ${heartbeatDetail(o.workers?.tts)} · runtime protocol: ${s?.runtime?.protocol_enabled==null?'нет данных':s.runtime.protocol_enabled?'включён':'выключен'}`);
+    const e=o.character?.active_event;
     set('event',e?.text||'Нет события в обработке');const tags=$('event-tags');tags.replaceChildren();for(const x of e?[e.channel,e.created_at?stamp(e.created_at):null,e.processed?'завершено':'в работе'].filter(Boolean):[]){const span=document.createElement('span');span.className='chip';span.textContent=x;tags.append(span)}
-  }catch(err){set('connection',err.message);$('connection').className='error';paused=null;$('character-toggle').disabled=true} }
-  $('connect').addEventListener('submit',e=>{e.preventDefault();token=$('token').value.trim();sessionStorage.setItem('owner-token',token);$('connection').className='';refresh();clearInterval(timer);timer=setInterval(refresh,5000)});
+  }
+  function paintStatus(s){
+    const tg=s?.adapters?.telegram; const accounts=typeof tg==='object'?(tg.accounts||[]):[];const bindings=typeof tg==='object'?(tg.bindings||[]):[];const deliveries=typeof tg==='object'?(tg.deliveries||[]):[];
+    $('telegram').innerHTML=state(accounts[0]?.status|| (accounts.length?'configured':'not_configured'));set('telegram-detail',` ${s?`${bindings.length} привязок · ${deliveries.filter(x=>['pending','retry_wait'].includes(x.state)).length} доставок в очереди`:'Нет данных о доставках'}`);
+  }
+  function paintBudget(policy){
+    const budget=policy?.resources;
+    const number=new Intl.NumberFormat('ru-RU');
+    set('budget-status',budget?'Minecraft-цели без лимита':(policy?'Профиль не задан':'Нет данных о лимитах'));
+    set('budget-tokens',budget?`Учтённые токены · ${number.format(budget.tokens)}`:'—');
+    set('budget-dispatches',budget?`Учтённые запуски · ${number.format(budget.dispatches)}`:'—');
+    set('budget-next',budget?'Суточные лимиты действуют для остальных задач.':'');
+  }
+  function paintChat(chat){
+    const shadowStates={disabled:'Выключен',starting:'Запускается',ready:'Готов',classifying:'Оценивает сообщение',unavailable:'Модель недоступна или вернула ошибку'};
+    set('shadow-status',`Быстрый контур в тени · ${shadowStates[chat.shadow.state]||chat.shadow.state}${chat.shadow.model?' · '+chat.shadow.model:''}`);
+    paintMessages('owner-chat',chat.messages,true);
+    paintMessages('agent-feed',chat.feed,false);
+    $('chat-send').disabled=chatBusy;
+    if(/^(Подключите|Чат недоступен)/.test($('chat-feedback').textContent))set('chat-feedback','');
+  }
+  let polling=false;
+  async function poll(){
+    if(polling)return;
+    polling=true;
+    try{await refresh()}finally{polling=false}
+  }
+  async function refresh(){
+    const version=++refreshVersion;
+    if(!token)return;
+    const failures=[];
+    const read=async (label,path,paint,onError=()=>{})=>{
+      try{
+        const value=await get(path);
+        if(version===refreshVersion)await paint(value);
+      }catch(error){
+        if(version!==refreshVersion)return;
+        failures.push(`${label} · ${error.message}`);
+        onError(error);
+      }
+    };
+    await Promise.all([
+      read('Обзор','/owner/overview',o=>{overview=o;paintOverview(o,status);paintGoal();paintActivity()},()=>{
+        overview=null;paintControl(null);set('updated','');set('character-state','Нет свежих данных');paintGoal();paintActivity();
+      }),
+      read('Системы','/owner/status',s=>{status=s;paintStatus(s);if(overview)paintOverview(overview,s);paintGoal()},()=>{
+        status=null;paintStatus(null);if(overview)paintOverview(overview,null);paintGoal();
+      }),
+      read('Чат','/owner/chat',paintChat,()=>{$('chat-send').disabled=true;set('shadow-status','Поток сообщений недоступен. Ниже показаны последние полученные данные.');set('chat-feedback','Чат недоступен. Отправка временно отключена.')}),
+      read('Лимиты','/owner/runtime-policy',p=>{runtimePolicy=p;paintBudget(p);paintGoal()},()=>{runtimePolicy=null;paintBudget(null);paintGoal()}),
+      read('Проверки','/owner/runtime-reviews',p=>{reviews=p.reviews;paintGoal();paintActivity()},()=>{reviews=null;paintGoal();paintActivity()}),
+      read('Задачи',`/owner/activities?limit=${pageSize}&offset=${offset}`,p=>{
+        if(offset===0){latestOpen=p.activities;paintGoal()}
+        return paintPage(p);
+      },()=>{
+        latestOpen=[];paintGoal();activityDetail=null;detailVersion++;paintActivity();
+        set('activities','Список задач недоступен.');$('activity-select').disabled=true;
+      }),
+      ...(offset===0?[]:[read('Текущие цели',`/owner/activities?limit=${pageSize}&offset=0`,p=>{latestOpen=p.activities;paintGoal()},()=>{latestOpen=[];paintGoal()})])
+    ]);
+    if(version!==refreshVersion)return;
+    $('connection').className=failures.length?'error':'';
+    set('connection',failures.length?failures.join(' | '):'Подключено');
+  }
+  $('connect').addEventListener('submit',e=>{e.preventDefault();token=$('token').value.trim();overview=null;status=null;runtimePolicy=null;reviews=null;latestOpen=[];offset=0;selectedId=null;activityDetail=null;detailVersion++;paintControl(null);paintActivity();$('chat-send').disabled=true;$('owner-chat').replaceChildren();$('agent-feed').replaceChildren();sessionStorage.setItem('owner-token',token);$('connection').className='';refresh();clearInterval(timer);timer=setInterval(poll,5000)});
   $('character-toggle').addEventListener('click',togglePause);
-  if(token){refresh();timer=setInterval(refresh,5000)}
+  if(token){refresh();timer=setInterval(poll,5000)}
 })();
 </script>
 </body>

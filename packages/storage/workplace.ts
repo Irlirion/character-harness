@@ -43,7 +43,7 @@ export async function scheduleAutonomy(db:pg.PoolClient,p:Principal,now:Date){
  }
 }
 export async function commitDesk(db:pg.PoolClient,p:Principal,b:WorkDecision,activity:any,approved:boolean,state:any){
- if(activity.origin==='self'&&b.decision.action!=='complete')throw new DomainError('self_wake_must_complete');
+ if(activity.origin==='self'&&!activity.invocation_id.startsWith('minecraft-self:goal:')&&b.decision.action!=='complete')throw new DomainError('self_wake_must_complete');
  if(!b.desk&&!b.shared_desk&&!b.initiative)return;
  if(!approved)throw new DomainError('runtime_approval_invalid');
  const g=(await db.query('SELECT * FROM runtime_model_grants WHERE turn_id=$1',[b.turn_id])).rows[0];

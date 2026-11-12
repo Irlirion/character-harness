@@ -1,3 +1,4 @@
+import { OWNER_CHAT_AUDIENCE } from '../domain/policy.ts';
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { assertActive, assertReplay, DomainError } from '../domain/policy.ts';
@@ -80,8 +81,8 @@ export async function nextEvent(p: Principal, telegram=false) {
     }
     if(state.active_event_id)await db.query('DELETE FROM social_memory_staging WHERE character_id=$1 AND event_id=$2',[p.characterId,state.active_event_id]);
     const event = (await db.query(`SELECT id,audience_id,channel,author_id,author_provenance,author_trust,author_metadata,text,reply_to,source_key FROM social_events
-      WHERE character_id=$1 AND (audience_id=$2 OR ($3 AND channel='telegram' AND turn_expires_at>now() AND EXISTS(SELECT 1 FROM telegram_bindings b WHERE b.audience_id=social_events.audience_id AND b.enabled))) AND NOT processed AND attempts<3 ORDER BY created_at,id LIMIT 1`,
-      [p.characterId,p.audienceId,telegram])).rows[0];
+      WHERE character_id=$1 AND (audience_id IN ($2,$4) OR ($3 AND channel='telegram' AND turn_expires_at>now() AND EXISTS(SELECT 1 FROM telegram_bindings b WHERE b.audience_id=social_events.audience_id AND b.enabled))) AND NOT processed AND attempts<3 ORDER BY created_at,id LIMIT 1`,
+      [p.characterId,p.audienceId,telegram,OWNER_CHAT_AUDIENCE])).rows[0];
     if (event) {
       await db.query('UPDATE social_events SET attempts=attempts+1 WHERE id=$1', [event.id]);
       const claimed=(await db.query("UPDATE characters SET epoch=epoch+1,lease_until=now()+interval '2 minutes',active_event_id=$2 WHERE id=$1 RETURNING epoch", [p.characterId,event.id])).rows[0];

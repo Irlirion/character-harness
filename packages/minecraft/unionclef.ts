@@ -1,3 +1,5 @@
+import { HOUSE_BLOCK, woodenHouseCells, type WoodenHousePhase } from './wooden-house.ts';
+import type { MinecraftGoalCriterion } from '../runtime/protocol.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 
@@ -11,11 +13,15 @@ type Pool={query:(sql:string,params?:unknown[])=>Promise<{rows:any[];rowCount:nu
 export class UnionClefWorkspace {
  private id=0;
  private active?:MinecraftAccess;
+ private goalEvidence?:{invocation:string;access:MinecraftAccess;observed:boolean;navigated:boolean;self?:{onGround?:boolean;hp?:number;pos?:string};origin?:{x:number;z:number}};
+ private navigation?:{invocation:string;access:MinecraftAccess;target:{x:number;y:number;z:number}};
+ private activeGuard?:()=>Promise<unknown>;
  private busy=false;
  private generation=0;
  private stopping=false;
  private checking=false;
  private observedSession?:string;
+ private reconnectFrom?:string;
  private cachedStatus?:{at:number;value:any};
  private timer?:ReturnType<typeof setInterval>;
  private options:WorkspaceOptions;
@@ -68,6 +74,133 @@ export class UnionClefWorkspace {
    this.cachedStatus={at:Date.now(),value};return value;
   }
  }
+ async nearbySurface(radius=4){return this.readTool('getSurfaceMap',{radius});}
+ async navigationStatus(){return this.readTool('pathStatus');}
+ async observeGoal(invocation:string,epoch:number){
+  const access=await this.options.access();
+  if(access.epoch!==epoch)throw new Error('minecraft_epoch_changed');
+  const scene=await this.observe();
+  const current=await this.options.access();
+  if(scene.connected&&scene.snapshot&&current.epoch===epoch&&current.session===access.session){
+   const evidence=this.goalEvidence;
+   if(evidence?.invocation===invocation&&evidence.access.session===access.session){
+    evidence.observed=true;
+    evidence.self=scene.snapshot.self;
+   }else this.goalEvidence={invocation,access,observed:true,navigated:false,self:scene.snapshot.self};
+  }
+  return scene;
+ }
+ async recordGoalNavigation(invocation:string,epoch:number,origin?:{x:number;z:number}){
+  const access=await this.options.access();
+  if(access.epoch!==epoch)throw new Error('minecraft_epoch_changed');
+  const evidence=this.goalEvidence;
+  if(evidence?.invocation===invocation&&evidence.access.session===access.session){
+   evidence.navigated=true;
+   evidence.origin=origin;
+  }else this.goalEvidence={invocation,access,observed:false,navigated:true,origin};
+ }
+ async verifiedGoalStep(invocation:string,epoch:number,criterion?:MinecraftGoalCriterion,activityId?:string):Promise<boolean>{
+  const evidence=this.goalEvidence;
+  if(!evidence?.observed||evidence.invocation!==invocation||evidence.access.epoch!==epoch)return false;
+  try{
+   const current=await this.options.access();
+   if(current.epoch!==epoch||current.session!==evidence.access.session||this.goalEvidence!==evidence)return false;
+   if(criterion?.kind==='grounded'){
+    return !evidence.navigated&&evidence.self?.onGround===true
+      &&typeof evidence.self.hp==='number'&&evidence.self.hp>=criterion.min_health;
+   }
+   if(criterion?.kind==='house'){
+    const progress=await this.houseProgress(criterion);
+    const latest=await this.options.access();
+    return progress.complete&&latest.epoch===epoch&&latest.session===current.session&&this.goalEvidence===evidence;
+   }
+   if(criterion?.kind==='arrival'){
+    const target=this.navigation?.target;
+    if(evidence.navigated&&target?.x===criterion.x&&target.y===criterion.y&&target.z===criterion.z
+      &&await this.verifiedArrival(invocation,epoch))return true;
+    if(!activityId||evidence.self?.onGround!==true||!evidence.self.pos)return false;
+    const position=evidence.self.pos.split(',').map(Number);
+    if(position.length!==3||position.some(value=>!Number.isFinite(value)))return false;
+    const [x,y,z]=position;
+    if(Math.hypot(x-criterion.x,y-criterion.y,z-criterion.z)>=1.5)return false;
+    const prior=(await this.options.pool.query(`SELECT r.result->'goal_navigation'->'origin' AS origin
+      FROM runtime_turns t JOIN minecraft_tool_receipts r ON r.character_id=t.character_id
+        AND r.invocation_id='activity:'||t.id::text
+      WHERE t.character_id=$1 AND t.activity_id=$2 AND r.state='returned'
+        AND r.result->'goal_navigation'->>'session'=$3
+        AND r.result->'goal_navigation'->'target'=$4::jsonb
+      ORDER BY t.created_at DESC LIMIT 1`,
+      [this.options.characterId,activityId,current.session,JSON.stringify({x:criterion.x,y:criterion.y,z:criterion.z})])).rows[0];
+    if(!prior?.origin||Math.hypot(x-prior.origin.x,z-prior.origin.z)<1.5)return false;
+    const path=await this.navigationStatus();
+    const latest=await this.options.access();
+    return path?.ok===true&&path.busy===false&&latest.epoch===epoch&&latest.session===current.session&&this.goalEvidence===evidence;
+   }
+   return (!evidence.navigated||await this.verifiedArrival(invocation,epoch))&&this.goalEvidence===evidence;
+  }catch{return false;}
+ }
+ private async houseBlocks(cells:{x:number;y:number;z:number}[]){
+  const blocks=[];
+  for(let i=0;i<cells.length;i+=6){
+   blocks.push(...await Promise.all(cells.slice(i,i+6).map(cell=>this.readTool('getBlockAt',cell))));
+  }
+  return blocks;
+ }
+ async houseProgress(criterion:WoodenHousePhase){
+  const {required,open}=woodenHouseCells(criterion);
+  const blocks=await this.houseBlocks([...required,...open]);
+  const placed=blocks.slice(0,required.length).filter(block=>block.id===HOUSE_BLOCK).length;
+  const openingClear=blocks.slice(required.length).every(block=>block.is_air===true||block.is_air==='true');
+  return {placed,required:required.length,opening_clear:openingClear,complete:placed===required.length&&openingClear};
+ }
+ async buildHouse(criterion:WoodenHousePhase,invocation:string,epoch:number,guard:()=>Promise<unknown>){
+  const scene=await this.observe();
+  const pos=typeof scene.snapshot?.self?.pos==='string'?scene.snapshot.self.pos.split(',').map(Number):[];
+  if(!scene.connected||pos.length!==3||!pos.every(Number.isFinite)
+    ||Math.hypot(pos[0]-criterion.x,pos[1]-criterion.y,pos[2]-criterion.z)>16)
+   return {queued:false,reason:'house_site_out_of_range'};
+  const queue=await this.readTool('buildQueue');
+  if(queue.done!==true)return {queued:false,reason:'builder_busy'};
+  const {place,open}=woodenHouseCells(criterion);
+  const isAir=(block:any)=>block.is_air===true||block.is_air==='true';
+  let unsupportedFloor=new Set<typeof place[number]>();
+  if(criterion.phase==='floor'){
+   const natural=(block:any)=>['minecraft:grass_block','minecraft:dirt','minecraft:stone','minecraft:coarse_dirt','minecraft:podzol'].includes(block.id);
+   const ground=await this.houseBlocks(place.map(cell=>({...cell,y:cell.y-1})));
+   const low=place.filter((_cell,i)=>!natural(ground[i]));
+   unsupportedFloor=new Set(low);
+   if(low.length===place.length||ground.some(block=>!natural(block)&&!isAir(block)&&block.id!=='minecraft:short_grass'))
+    return {queued:false,reason:'house_foundation_unsupported'};
+   const below=await this.houseBlocks(low.map(cell=>({...cell,y:cell.y-2})));
+   if(below.some(block=>!natural(block)))return {queued:false,reason:'house_foundation_unsupported'};
+  }
+  const existing=await this.houseBlocks([...place,...open]);
+  if(existing.slice(place.length).some(block=>!isAir(block))
+    ||existing.slice(0,place.length).some(block=>!isAir(block)&&block.id!==HOUSE_BLOCK&&!(criterion.phase==='floor'&&block.id==='minecraft:short_grass')))
+   return {queued:false,reason:'house_site_obstructed'};
+  const pending=place.filter((_cell,i)=>existing[i].id!==HOUSE_BLOCK).sort((a,b)=>Number(unsupportedFloor.has(a))-Number(unsupportedFloor.has(b))||a.y-b.y).slice(0,20);
+  if(!pending.length)return {queued:false,reason:'already_placed'};
+  const inventory=await this.readTool('inventorySpace');
+  if(!inventory.blocks?.[HOUSE_BLOCK])return {queued:false,reason:'oak_planks_missing'};
+  return this.call('buildBlocks',{blocks:JSON.stringify(pending.map(({x,y,z})=>[x,y,z,HOUSE_BLOCK]))},
+   invocation,epoch,guard,true);
+ }
+ async verifiedArrival(invocation:string,epoch:number):Promise<boolean>{
+  const nav=this.navigation;
+  if(!nav||nav.invocation!==invocation||nav.access.epoch!==epoch||this.busy||this.stopping)return false;
+  try{
+   const access=await this.options.access();
+   if(access.epoch!==epoch||access.session!==nav.access.session)return false;
+   const status=await this.navigationStatus();
+   const pos=typeof status?.pos==='string'?status.pos.split(','):null;
+   if(status?.ok!==true||status.busy!==false||pos?.length!==3||pos.some((v:string)=>!v.trim()||!Number.isFinite(Number(v))))return false;
+   const origin=this.goalEvidence?.invocation===invocation?this.goalEvidence.origin:undefined;
+   if(origin&&Math.hypot(Number(pos[0])-origin.x,Number(pos[2])-origin.z)<1.5)return false;
+   const current=await this.options.access();
+   return this.navigation===nav&&!this.busy&&!this.stopping&&current.epoch===epoch&&current.session===access.session
+     &&Math.hypot(Number(pos[0])-nav.target.x,Number(pos[1])-nav.target.y,Number(pos[2])-nav.target.z)<1.5;
+  }catch{return false;}
+ }
  async observe():Promise<any>{
   const state=await this.status();
   if(!state.connected)return state;
@@ -75,17 +208,25 @@ export class UnionClefWorkspace {
   catch{return {available:true,connected:false,stale:true,session_id:null,error_code:'unionclef_observation_failed'};}
  }
  /** Multiple independent engines share database receipts; uncertain calls are never resent. */
- async call(name:string,args:Record<string,unknown>,invocation:string,epoch:number,guard:()=>Promise<unknown>=async()=>{}):Promise<unknown>{
+ async call(name:string,args:Record<string,unknown>,invocation:string,epoch:number,guard:()=>Promise<unknown>=async()=>{},retainGuard=false):Promise<unknown>{
   if(this.busy||this.stopping)throw new Error('minecraft_busy');
   const generation=this.generation;
   this.busy=true;
   try{
    const access=await this.options.access();if(access.epoch!==epoch)throw new Error('minecraft_epoch_changed');
+   if(this.reconnectFrom===access.session&&name!=='ConnectToServer')throw new Error('minecraft_reconnect_pending');
+   if(this.reconnectFrom!==access.session)this.reconnectFrom=undefined;
    const catalog=await this.catalog();const tool=catalog.find(t=>t.name===name);if(!tool)throw new Error('unknown_minecraft_tool');
    z.fromJSONSchema(tool.inputSchema).parse(args);
-   if(name==='ConnectToServer')throw new Error('server_switch_requires_reconnect');
-   if(name==='ExecuteCommand')throw new Error('arbitrary_commands_disabled');
-   if(name==='ChatMessage'&&typeof args.msg==='string'&&/^[\s]*[;@/]/.test(args.msg))throw new Error('minecraft_commands_disabled');
+   const observesWorld=['getGameState','inventorySpace','getOpenScreen','getRecentChat','canReach','getBlockAt','getBlocksAround','getSurfaceMap',
+    'pathStatus','pathingMode','punkStatus','runAwayStatus','buildQueue','mineStatus','selectionSize','undoStatus','replaceStatus','canBreakBlock','canPlaceBlock','inGame'].includes(name);
+   const initiative=name==='ChatMessage'&&invocation.startsWith('initiative:');
+   if(initiative){
+    const recent=await this.options.pool.query(`SELECT 1 FROM minecraft_tool_receipts
+      WHERE character_id=$1 AND invocation_id LIKE 'initiative:%'
+        AND created_at>clock_timestamp()-interval '3 minutes' LIMIT 1`,[this.options.characterId]);
+    if(recent.rowCount)return {sent:false,reason:'initiative_cooldown'};
+   }
    const payload=JSON.stringify({name,args,epoch,session:access.session});
    const hash=createHash('sha256').update(payload).digest('hex');
    const inserted=await this.options.pool.query(`INSERT INTO minecraft_tool_receipts(character_id,invocation_id,request_hash,state) VALUES($1,$2,$3,'unknown') ON CONFLICT DO NOTHING RETURNING invocation_id`,[this.options.characterId,invocation,hash]);
@@ -97,20 +238,45 @@ export class UnionClefWorkspace {
    await guard();
    if(generation!==this.generation)throw new Error('minecraft_stopped');
    const current=await this.options.access();if(current.epoch!==epoch||current.session!==access.session)throw new Error('minecraft_session_changed');
-   this.active=access;
+   if(!initiative&&!observesWorld){
+    this.navigation=undefined;
+    this.active=access;
+    this.activeGuard=retainGuard?guard:undefined;
+   }
    const result=await this.rpc('tools/call',{name,arguments:args});
-   try{if(generation!==this.generation)throw new Error('stopped');const after=await this.options.access();if(after.epoch!==epoch||after.session!==access.session)throw new Error('revoked');}
-   catch{await this.stop();throw new Error('minecraft_access_revoked');}
-   await this.options.pool.query(`UPDATE minecraft_tool_receipts SET state='returned',result=$3::jsonb WHERE character_id=$1 AND invocation_id=$2`,[this.options.characterId,invocation,JSON.stringify(result)]);
+   if(name==='ConnectToServer'&&!result.isError&&generation===this.generation){
+    // The tool initiates a reconnect. Only a fresh authorized session can issue another call.
+    this.active=undefined;
+    this.activeGuard=undefined;
+    this.goalEvidence=undefined;
+    this.cachedStatus=undefined;
+    this.reconnectFrom=access.session;
+   }else{
+    try{if(generation!==this.generation)throw new Error('stopped');const after=await this.options.access();if(after.epoch!==epoch||after.session!==access.session)throw new Error('revoked');}
+    catch{await this.stop();throw new Error('minecraft_access_revoked');}
+   }
+   let receipt=result;
+   if(retainGuard&&name==='gotoXYZ'&&!result.isError){
+    const text=result.content?.find((item:any)=>item.type==='text')?.text;
+    try{
+     if(JSON.parse(text).ok===true){
+      const target=args as {x:number;y:number;z:number};
+      this.navigation={invocation,access,target};
+      const origin=this.goalEvidence?.invocation===invocation?this.goalEvidence.origin:undefined;
+      if(origin)receipt={...result,goal_navigation:{target,origin,session:access.session}};
+     }
+    }catch{/* No receipt of acceptance. */}
+   }
+   await this.options.pool.query(`UPDATE minecraft_tool_receipts SET state='returned',result=$3::jsonb WHERE character_id=$1 AND invocation_id=$2`,[this.options.characterId,invocation,JSON.stringify(receipt)]);
    return {state:'returned',result};
   }finally{this.busy=false;}
  }
  async stop():Promise<unknown>{
-  this.generation++;this.stopping=true;
+  this.generation++;this.stopping=true;this.navigation=undefined;this.goalEvidence=undefined;
   // These stop independent UnionClef task engines, not only the route follower.
   const results=await Promise.allSettled(['stopPathing','punkStop','runAwayStop','buildQueueClear'].map(name=>this.rpc('tools/call',{name,arguments:{}})));
   if(results.some(r=>r.status==='rejected'||r.value.isError))throw new Error('minecraft_stop_unconfirmed');
-  this.active=undefined;this.stopping=false;return {stop_requested:true,completed:false};
+  this.active=undefined;this.activeGuard=undefined;this.stopping=false;return {stop_requested:true,completed:false};
  }
  start(){
   if(this.timer)return;
@@ -118,8 +284,9 @@ export class UnionClefWorkspace {
  }
  async check(){
   if(!this.active||this.checking)return;this.checking=true;
-  try{const a=await this.options.access();if(a.epoch!==this.active.epoch||a.session!==this.active.session)throw new Error('revoked');}
-  catch{await this.stop().catch(()=>{});}
+  const active=this.active, guard=this.activeGuard;
+  try{const a=await this.options.access();if(a.epoch!==active.epoch||a.session!==active.session)throw new Error('revoked');await guard?.();}
+  catch{if(this.active===active)await this.stop().catch(()=>{});}
   finally{this.checking=false;}
  }
  async close(){if(this.timer)clearInterval(this.timer);if(this.active)await this.stop().catch(()=>{});}

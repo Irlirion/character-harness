@@ -20,14 +20,17 @@ export async function assertCurrentProfile(db:pg.PoolClient,p:Principal,version:
  if(!current||current.profile.version!==version||current.profile_hash!==hash||!profileUsable(current.profile,now))throw new DomainError('runtime_policy_stale');
  return current.profile;
 }
+const runtimeBudgetWindow = `created_at>greatest(clock_timestamp()-interval '24 hours',
+  (SELECT runtime_budget_reset_at FROM characters WHERE id=$1))`;
+
 export async function resourceBudget(db:Pick<pg.Pool,'query'>|pg.PoolClient,p:Principal,profile:RuntimeProfile) {
  const r=(await db.query(`SELECT count(*)::int AS dispatches,coalesce(sum(greatest(reserved_tokens,coalesce(observed_tokens,0))),0)::bigint AS tokens
-  FROM runtime_model_grants WHERE character_id=$1 AND created_at>clock_timestamp()-interval '24 hours'`,[p.characterId])).rows[0];
+  FROM runtime_model_grants WHERE character_id=$1 AND ${runtimeBudgetWindow}`,[p.characterId])).rows[0];
  return {dispatches:r.dispatches as number,tokens:Number(r.tokens),allowed:r.dispatches<profile.max_dispatches_24h&&Number(r.tokens)+profile.reserved_tokens<=profile.token_budget_24h};
 }
 export async function reserveModelGrant(db:pg.PoolClient,p:Principal,turn:any,approved:ApprovedClaim) {
  const profile=await assertCurrentProfile(db,p,approved.profile.version,approved.profile_hash);
- if(!(await resourceBudget(db,p,profile)).allowed)throw new DomainError('runtime_resource_budget');
+ if(!approved.input.minecraft_goal&&!(await resourceBudget(db,p,profile)).allowed)throw new DomainError('runtime_resource_budget');
  const id=randomUUID();
  await db.query(`INSERT INTO runtime_model_grants(id,turn_id,activity_id,character_id,audience_id,policy_version,profile_hash,source_hash,input_hash,approved_input,persona,engine,model,expires_at,reserved_tokens,max_model_ms)
   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,least($14::timestamptz,$15::timestamptz),$16,$17)`,
@@ -127,13 +130,32 @@ export class RuntimeAuthorizationStore {
    await db.query('COMMIT');
   }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
  }
+ async resourceOverview(p:Principal,profile:RuntimeProfile) {
+  const usage=await this.budget(p,profile);
+  const limits={dispatch_limit:profile.max_dispatches_24h,token_limit:profile.token_budget_24h,
+   next_turn_reservation:profile.reserved_tokens};
+  if(usage.allowed||limits.next_turn_reservation>limits.token_limit)return {...usage,...limits,next_dispatch_at:null};
+  const {rows:[row]}=await this.pool.query(`
+   WITH recent AS (
+    SELECT created_at, greatest(reserved_tokens,coalesce(observed_tokens,0)) AS tokens
+    FROM runtime_model_grants WHERE character_id=$1 AND ${runtimeBudgetWindow}
+   ), expiry AS (
+    SELECT created_at,count(*) OVER ()-count(*) OVER (ORDER BY created_at) AS remaining_dispatches,
+      sum(tokens) OVER ()-sum(tokens) OVER (ORDER BY created_at) AS remaining_tokens
+    FROM recent
+   )
+   SELECT min(created_at)+interval '24 hours' AS next_dispatch_at
+   FROM expiry WHERE remaining_dispatches<$2 AND remaining_tokens+$3<=$4
+  `,[p.characterId,limits.dispatch_limit,limits.next_turn_reservation,limits.token_limit]);
+  return {...usage,...limits,next_dispatch_at:row.next_dispatch_at};
+ }
  async overview(p:Principal) {
   const current=await this.profile(p);
   const grants=(await this.pool.query(`SELECT turn_id,policy_version,engine,model,state,reserved_tokens,observed_tokens,usage_source,created_at,started_at,expires_at
    FROM runtime_model_grants WHERE character_id=$1 AND audience_id=$2 ORDER BY created_at DESC LIMIT 20`,[p.characterId,p.audienceId])).rows;
   return {profile:current?{version:current.profile.version,enabled:current.profile.enabled,provider_eligible:current.profile.provider_eligible,
    reviewed_at:current.profile.reviewed_at,expires_at:current.profile.expires_at,engine:current.profile.engine,model:current.profile.model}:null,
-   resources:current?await this.budget(p,current.profile):null,grants};
+   resources:current?await this.resourceOverview(p,current.profile):null,grants};
  }
  async replay(p:Principal,requestId:string) {
   return (await this.pool.query(`SELECT g.turn_id FROM runtime_model_grants g JOIN runtime_turns t ON t.id=g.turn_id WHERE t.character_id=$1 AND t.audience_id=$2 AND t.request_id=$3`,[p.characterId,p.audienceId,requestId])).rows[0]??null;

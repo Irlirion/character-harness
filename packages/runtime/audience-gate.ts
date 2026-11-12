@@ -26,6 +26,19 @@ export class RuntimeAudienceGate implements RuntimeExecutionGate {
  }
  private async scoped(p:Principal,input:unknown,accounting=false){const id=z.object({turn_id:z.uuid()}).parse(input).turn_id,scopes=await this.audiences(p,accounting);const row=(await this.pool.query('SELECT audience_id FROM runtime_turns WHERE id=$1 AND character_id=$2 AND audience_id=ANY($3::text[])',[id,p.characterId,scopes])).rows[0];if(!row)throw new DomainError('runtime_scope_denied');return {...p,audienceId:row.audience_id};}
  async lease(p:Principal,b:unknown){return this.gate.lease(await this.scoped(p,b),b);}
+ async gameLease(p:Principal,b:unknown,navigate=false,initiative=false){
+  const scope=await this.scoped(p,b);
+  if(scope.audienceId!==p.audienceId)return {valid:false};
+  return await this.gate.gameLease?.(scope,b,navigate,initiative)??{valid:false};
+ }
+ async gameHousePhase(p:Principal,b:unknown){
+  const scope=await this.scoped(p,b);
+  return scope.audienceId===p.audienceId?await this.gate.gameHousePhase?.(scope,b)??null:null;
+ }
+ async gameCriterionMet(p:Principal,b:unknown){
+  const scope=await this.scoped(p,b);
+  return scope.audienceId===p.audienceId&&!!await this.gate.gameCriterionMet?.(scope,b);
+ }
  async start(p:Principal,b:unknown){return this.gate.start(await this.scoped(p,b),b);}
  async decide(p:Principal,b:unknown){return this.gate.decide(await this.scoped(p,b),b);}
  async usage(p:Principal,b:unknown){return this.gate.usage(await this.scoped(p,b,true),b);}

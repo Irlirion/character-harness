@@ -26,6 +26,9 @@ services:
   core:
     build: .
     environment:
+      SHADOW_KEV_URL: ${SHADOW_KEV_URL:-}
+      SHADOW_OLLAMA_URL: ${SHADOW_OLLAMA_URL:-}
+      SHADOW_MODEL: ${SHADOW_MODEL:-qwen2.5:0.5b}
       DATABASE_URL_FILE: /run/secrets/database_url
       ENGINE_TOKEN_FILE: /run/secrets/engine_token
       OWNER_TOKEN_FILE: /run/secrets/owner_token

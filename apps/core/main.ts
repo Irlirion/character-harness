@@ -1,3 +1,4 @@
+import { startShadow } from './shadow.ts';
 import { UnionClefWorkspace } from '../../packages/minecraft/unionclef.ts';
 import {MemberProfileSchema} from '../../packages/telegram/member-profile.ts';
 import {GroupDirectorySchema} from '../../packages/telegram/group-directory.ts';
@@ -40,9 +41,10 @@ await pool.query(`INSERT INTO characters(id,name,persona) VALUES($1,$2,$3)
 
 const telegramToken=process.env.TELEGRAM_WORKER_TOKEN_FILE || process.env.TELEGRAM_WORKER_TOKEN ? secret('TELEGRAM_WORKER_TOKEN') : undefined;
 if(telegramToken && (telegramToken.length<32 || new Set([telegramToken,engineToken,ownerToken,audioToken,bridgeToken]).size!==5)) throw new Error('Distinct Telegram worker token required');
-const runtime=enableRuntimeStorage?new RuntimeStore(pool):undefined;
+const runtime=enableRuntimeStorage?new RuntimeStore(pool,undefined,process.env.RUNTIME_MINECRAFT_ENABLED==='true'):undefined;
 const runtimeAuth=runtime?new RuntimeAuthorizationStore(pool):undefined;
-const reviewerConfig=runtime?await loadReviewerConfig(process.env.RUNTIME_REVIEWER_CONFIG_FILE):undefined;
+const skipMinecraftContentReview=process.env.RUNTIME_MINECRAFT_CONTENT_REVIEW_DISABLED==='true';
+const reviewerConfig=runtime&&!skipMinecraftContentReview?await loadReviewerConfig(process.env.RUNTIME_REVIEWER_CONFIG_FILE):undefined;
 const reviewer=reviewerConfig&&runtimeAuth?createProcessReviewer(reviewerConfig,(signal,binding)=>runtimeAuth.reserveReview(principal,reviewerConfig.max_requests_24h,signal,binding)):undefined;
 const telegram=telegramToken?new TelegramStore(pool,character.id,runtime,reviewer?{reviewer,timeoutMs:reviewerConfig!.timeout_ms+100}:undefined,async(chat_id,known_user_ids)=>{
  const r=await fetch('http://telegram:3001/group-participants',{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${telegramToken}`,'Content-Type':'application/json'},body:JSON.stringify({chat_id,known_user_ids}),signal:AbortSignal.timeout(20000)});
@@ -58,20 +60,30 @@ if(process.env.UNIONCLEF_MCP_URL)minecraft=new UnionClefWorkspace({url:process.e
  return {epoch:state.epoch,session:observation.session_id};
 }});
 minecraft?.start();
+const shadow = !skipMinecraftContentReview&&process.env.SHADOW_KEV_URL
+  ? startShadow(pool,character.id,process.env.SHADOW_KEV_URL,'kev-0.8b@v1.0','kev')
+  : process.env.SHADOW_OLLAMA_URL
+  ? startShadow(pool,character.id,process.env.SHADOW_OLLAMA_URL,process.env.SHADOW_MODEL || 'qwen2.5:0.5b','ollama')
+  : undefined;
 const app = buildApp({
+  shadowStatus: shadow?.status,
   principal, tokens: { engine: engineToken, owner: ownerToken, audio: audioToken, bridge:bridgeToken,telegram:telegramToken },
   allowClientWorld,allowSystemChatPublicDemo,
   telegram,minecraft,
   runtime, runtimeEngine:runtime,
   // A reviewer bridge requires explicit operator configuration; no profile is installed automatically.
-  runtimePolicy:runtime&&runtimeAuth?new RuntimeAudienceGate(new RuntimePolicyGate(runtime,runtimeAuth,reviewer,reviewerConfig?reviewerConfig.timeout_ms+100:2000),pool,p=>runtime.schedule(p)):undefined,
+  runtimePolicy:runtime&&runtimeAuth?new RuntimeAudienceGate(new RuntimePolicyGate(runtime,runtimeAuth,reviewer,reviewerConfig?reviewerConfig.timeout_ms+100:2000,minecraft?(id,epoch)=>minecraft!.verifiedArrival(`activity:${id}`,epoch):undefined,minecraft?(id,epoch,criterion,activityId)=>minecraft!.verifiedGoalStep(`activity:${id}`,epoch,criterion,activityId):undefined,skipMinecraftContentReview),pool,async p=>{
+    const world=process.env.RUNTIME_MINECRAFT_ENABLED==='true'&&minecraft
+      ? await latestWorldObservation(p) : undefined;
+    return runtime.schedule(p,world?.connected===true&&!world.stale&&world.server===SYSTEM_CHAT_SERVER);
+  }):undefined,
   images:telegram && process.env.TELEGRAM_IMAGES_ENABLED==='true'?new ImageStore(pool,character.id):undefined,
   memoryInstructions,
   responseInstructions,
   deps: { pool, loadSharedDesk:runtime?p=>sharedDesk(pool,p.characterId):undefined, status, search, remember, control, ingest, nextEvent:p=>nextEvent(p,!!telegram), recentConversation, loadSocialMemory:loadSocialContext, inspectEvent, stageMemory, socialCommitmentPage, complete, deferEvent, saveWorldObservation,latestWorldObservation,
     enqueueSpeech, claimSpeech, speechState, updateSpeech }
 });
-const shutdown = async () => { await minecraft?.close(); await app.close(); await pool.end(); };
+const shutdown = async () => { await shadow?.close(); await minecraft?.close(); await app.close(); await pool.end(); };
 process.once('SIGTERM', () => { void shutdown(); });
 process.once('SIGINT', () => { void shutdown(); });
 await app.listen({ host: '0.0.0.0', port: Number(process.env.PORT ?? 3000) });

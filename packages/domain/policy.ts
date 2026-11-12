@@ -1,3 +1,4 @@
+export const OWNER_CHAT_AUDIENCE = 'owner-dashboard';
 import { timingSafeEqual } from 'node:crypto';
 
 export type Principal = { characterId: string; audienceId: string };
