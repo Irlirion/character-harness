@@ -37,6 +37,8 @@ services:
       BRIDGE_CLIENT_WORLD_ENABLED: ${BRIDGE_CLIENT_WORLD_ENABLED:-false}
       BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO: ${BRIDGE_SYSTEM_CHAT_PUBLIC_DEMO:-false}
       RUNTIME_STORAGE_ENABLED: ${RUNTIME_STORAGE_ENABLED:-false}
+      RUNTIME_MINECRAFT_ENABLED: ${RUNTIME_MINECRAFT_ENABLED:-true}
+      RUNTIME_MINECRAFT_CONTENT_REVIEW_DISABLED: 'true'
       CHARACTER_ID: ${CHARACTER_ID:-lada}
       CHARACTER_FILE: ${CHARACTER_FILE:-characters/Lada/personalities.yml}
       AUDIENCE_ID: demo-public
@@ -63,6 +65,7 @@ services:
     environment:
       CORE_URL: http://core:3000
       RUNTIME_ENGINE_ENABLED: ${RUNTIME_ENGINE_ENABLED:-false}
+      RUNTIME_MINECRAFT_ENABLED: ${RUNTIME_MINECRAFT_ENABLED:-true}
       ENGINE_TOKEN_FILE: /run/secrets/engine_token
       MODEL_API_KEY_FILE: /run/secrets/model_api_key
       PI_PROVIDER: ${PI_PROVIDER:-}
@@ -85,6 +88,7 @@ services:
     environment:
       CORE_URL: http://core:3000
       RUNTIME_ENGINE_ENABLED: ${RUNTIME_ENGINE_ENABLED:-false}
+      RUNTIME_MINECRAFT_ENABLED: ${RUNTIME_MINECRAFT_ENABLED:-true}
       ENGINE_TOKEN_FILE: /run/secrets/engine_token
       HARNESS_CODEX_HOME: /data/codex
       CODEX_MODEL: ${CODEX_MODEL:-gpt-6-luna}

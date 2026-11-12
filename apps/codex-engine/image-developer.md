@@ -1,0 +1,1 @@
+Only call the native image generator once; do not make variants or refinements.

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import type { Principal } from '../domain/policy.ts';
 import { DomainError } from '../domain/policy.ts';
@@ -52,12 +53,10 @@ export class RuntimePolicyGate implements RuntimeExecutionGate {
   if(!minecraftGoal&&!(await this.auth.budget(p,profile)).allowed)return {work:null,reason:'runtime_resource_budget'};
   const previousGoal=typeof a.create_payload?.previousGoal==='string'?a.create_payload.previousGoal:null;
   const house=minecraftGoal&&a.create_payload?.minecraft_goal==='wooden_house';
+  const render=(name:string,values:Record<string,unknown>)=>readFileSync(new URL('./'+name,import.meta.url),'utf8').replace(/\{\{(\w+)\}\}/g,(_m,key)=>String(values[key]??''));
   const objective=house?a.objective:plan
-   ? `${a.objective}\nНа этом ходу выполни ровно шаг ${plan.completed+1} из ${plan.steps.length}: ${plan.steps[plan.completed]}.
-Сначала осмотри сцену.${plan.criteria?` Критерий этого шага: ${JSON.stringify(plan.criteria[plan.completed])}. Для arrival передай navigate точные координаты из критерия. Если свежий осмотр показывает, что ты уже у этой точки после предыдущего перемещения, сообщи verified=true без повторной команды.`:''} Если шаг требует осмотра или выбора точки, достаточно свежих данных: опиши, что именно подтвердилось, и поставь verified=true. Для такого шага не вызывай navigate. Если шаг требует перемещения, выбери проходимый блок на карте поверхности в 3–5 блоках по горизонтали от текущих координат и вызови navigate и ставь verified=true, когда сервер подтвердит criterion_met или verified_arrival. Не проси владельца искать игровой объект или давать координаты. Если данных не хватает, попробуй другой безопасный способ выполнить тот же шаг.`
-   : minecraftGoal
-    ? `${a.objective}\nПо свежей сцене реши, стоит ли начинать цель сейчас.${previousGoal?` Последняя завершённая цель: «${previousGoal}». Повторяй её только при изменившейся обстановке.`:''} Если сейчас нет полезной задачи или условия небезопасны, выбери через сколько секунд повторно осмотреть сцену и укажи причину. Если можно действовать, выбери цель, выполнимую здесь и сейчас. Составь два шага, каждый выполним за один ход. Опирайся на устойчивые элементы рельефа рядом с текущей позицией, которые видны на карте поверхности. Не выбирай цель, если для неё нужно искать отдельный предмет, растение или моба. Первый шаг — осмотр стартовой позиции с критерием grounded и минимальным здоровьем 1. Второй — перемещение с критерием arrival к проходимой точке на карте в 3–4 блоках по горизонтали. Для arrival скопируй точные координаты одной точки из arrival_candidates в результате survey. Это готовые позиции ног. Если подходящих точек нет, отложи цель.`
-    : a.objective;
+   ? render('goal-continue.md',{objective:a.objective,number:plan.completed+1,total:plan.steps.length,step:plan.steps[plan.completed],criterion_text:plan.criteria?render('goal-criterion.md',{criterion:JSON.stringify(plan.criteria[plan.completed])}):''})
+   : minecraftGoal?render('goal-create.md',{objective:a.objective,previous_text:previousGoal?render('goal-previous.md',{previous:previousGoal}):''}):a.objective;
   const modelInput:PlanningInput={...(minecraftGoal?{minecraft_goal:true as const}:{}),...(house?{minecraft_build:'wooden_house' as const}:{}),activity:{id:a.id,objective,origin:a.origin,remaining_turns:a.max_turns===null?null:a.max_turns-a.turns_used-1,input_reply:a.input_reply??null},
    checkpoint:candidate.checkpoint,audience_id:p.audienceId,wake_reason:candidate.wake_reason,suggested_wakeup_at:new Date(Date.now()+180000).toISOString(),...candidate.context};
   const payload=requestPayload(modelInput,candidate.persona,profile);

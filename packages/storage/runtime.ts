@@ -8,6 +8,10 @@ import { DomainError } from '../domain/policy.ts';
 import type { Principal } from '../domain/policy.ts';
 import { CreateActivitySchema, ClaimWorkSchema, WorkDecisionSchema, ActivityPageSchema, ActivityInputSchema } from '../runtime/contracts.ts';
 
+export function hasMinecraftGoalProgress(before:{completed:number}|null,after:{completed:number}|null):boolean {
+  return !!after&&(!before||after.completed>before.completed);
+}
+
 /** Durable activities. Engine access is gated; runtime leases grant no legacy tools. */
 export class RuntimeStore {
   private pool: pg.Pool;
@@ -100,9 +104,12 @@ export class RuntimeStore {
           (status IN ('ready','running') AND turns_used<max_turns AND NOT (origin='self' AND invocation_id LIKE 'minecraft-self:%'))
         ) LIMIT 1`,[p.characterId,p.audienceId]);
       if(busy.rowCount)return;
-      const openWake=await db.query(`SELECT 1 FROM runtime_activities WHERE character_id=$1 AND audience_id=$2
-        AND origin='self' AND invocation_id LIKE 'minecraft-self:goal:%'
-        AND status IN ('running','ready','waiting_time','needs_input') LIMIT 1`,[p.characterId,p.audienceId]);
+      const openWake=await db.query(`SELECT 1 FROM runtime_activities a WHERE a.character_id=$1 AND a.audience_id=$2
+        AND a.origin='self' AND a.invocation_id LIKE 'minecraft-self:goal:%'
+        AND a.status IN ('running','ready','waiting_time','needs_input')
+        AND NOT EXISTS (SELECT 1 FROM runtime_policy_holds h JOIN runtime_policy_current c
+          ON c.character_id=h.character_id AND c.version=h.policy_version
+          WHERE h.activity_id=a.id AND h.activity_version=a.version) LIMIT 1`,[p.characterId,p.audienceId]);
       if(openWake.rowCount)return;
       const previous=(await db.query(`SELECT c.state FROM runtime_activities a
         JOIN runtime_checkpoints c ON c.id=a.checkpoint_id
@@ -318,6 +325,10 @@ export class RuntimeStore {
       if (new Date(turn.lease_until) <= new Date(state.db_now) || !state.lease_until || new Date(state.lease_until) <= new Date(state.db_now)) throw new DomainError('lease_expired');
       const a = await this.activity(db,p,turn.activity_id);
       const gameGoal=a.origin==='self'&&a.invocation_id.startsWith('minecraft-self:goal:');
+      const priorCheckpoint=gameGoal&&a.checkpoint_id?(await db.query('SELECT state FROM runtime_checkpoints WHERE id=$1',[a.checkpoint_id])).rows[0]?.state:null;
+      const before=gameGoal?readMinecraftGoal(priorCheckpoint??null):null;
+      const after=gameGoal?readMinecraftGoal(b.checkpoint):null;
+      const madeProgress=hasMinecraftGoalProgress(before,after);
       if (a.version !== b.expected_version) throw new DomainError('activity_version_conflict');
       if (b.decision.action === 'wait_until' && new Date(b.decision.at).getTime() < new Date(state.db_now).getTime()+(gameGoal?10_000:60_000)) throw new DomainError('wakeup_too_soon');
       if(approved)await assertDecisionGrant(db,p,turn,b,approved,false);
@@ -328,7 +339,7 @@ export class RuntimeStore {
       const result = (await db.query(`UPDATE runtime_activities SET status=$2,checkpoint_id=$3,question=$4,summary=$5,input_reply=NULL,version=version+1,updated_at=now() WHERE id=$1 RETURNING *`,
         [a.id,status,checkpointId,b.decision.action==='request_input'?b.decision.question:null,b.decision.action==='complete'?b.decision.summary:null])).rows[0];
       if (status==='ready'||status==='waiting_time') {
-        const at = b.decision.action==='wait_until'?new Date(b.decision.at):new Date(new Date(state.db_now).getTime()+(gameGoal?10_000:60_000));
+        const at = b.decision.action==='wait_until'?new Date(b.decision.at):new Date(new Date(state.db_now).getTime()+(gameGoal?(madeProgress?1000:10_000):60_000));
         await this.wake(db,p,a.id,`decision:${turn.id}`,b.decision.action==='continue'?'continue':'at_time',at);
       }
       await db.query(`UPDATE runtime_turns SET status='finished',finished_at=now() WHERE id=$1`,[turn.id]);

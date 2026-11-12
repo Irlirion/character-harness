@@ -1,0 +1,1 @@
+Return JSON only. No tools or external effects are permitted.

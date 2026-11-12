@@ -1,3 +1,5 @@
+import { toolDescription } from '../domain/tool-descriptions.ts';
+import { readFileSync } from 'node:fs';
 import {setTimeout as delay} from 'node:timers/promises';
 import {compactRuntimeSurface,minecraftArrivalCandidates,minecraftHouseSites} from '../minecraft/runtime-view.ts';
 import type { CodexRpc } from '../codex/rpc.ts';
@@ -12,7 +14,7 @@ export async function runCodexPlanning(rpc:PlanningRpc,cwd:string,model:string,i
     ? ['survey','observe','navigate','speak','build','build_status']
     : input.minecraft_goal?['survey','observe','navigate','path_status','speak']:['observe','surface','navigate','path_status'];
   const gameTool={type:'function',name:'activity_minecraft',
-    description:'Use catalog to list every UnionClef tool and its arguments, then call to invoke one by name. The dedicated actions help collect goal evidence, survey terrain, and track navigation or construction. A returned request may still be running.',
+    description:toolDescription('runtime-use-catalog-to-list-every'),
     inputSchema:{type:'object',properties:{
       action:{type:'string',enum:[...gameActions,'catalog','call']},
       name:{type:'string'},
@@ -98,7 +100,7 @@ export async function runCodexPlanning(rpc:PlanningRpc,cwd:string,model:string,i
           if(request&&typeof request==='object'&&'target_too_close' in request){
             navigationRequested=false;
             return {success:false,contentItems:[{type:'inputText',text:JSON.stringify({
-              ...request,instruction:'No movement command was sent. Pick a different safe surface cell at least 3 horizontal blocks from origin and retry.'
+              ...request,instruction:readFileSync(new URL('./navigation-retry.md',import.meta.url),'utf8')
             })}]};
           }
           let status:{verified_arrival?:boolean;status?:{busy?:boolean;pos?:string}}={};

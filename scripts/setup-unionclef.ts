@@ -18,6 +18,16 @@ const pack=await readJson(join(dirname(game),'mmc-pack.json'));
 if(pack.components&&pack.components.find((c:any)=>c.uid==='net.minecraft')?.version!==release.minecraft)throw new Error('Minecraft 1.21.11 instance required');
 const s=await readJson(settings),tungstenPath=join(config,'tungsten.json'),t=await readJson(tungstenPath);
 const bridgeConfig=join(config,'character-harness-bridge.properties');
+let coreUrl='http://127.0.0.1:3000';
+try {
+ const existing=await readFile(bridgeConfig,'utf8');
+ const value=existing.match(/^\s*core_url\s*=\s*(\S+)\s*$/m)?.[1];
+ if(value){
+  const url=new URL(value);
+  if(url.protocol!=='http:'||!['127.0.0.1','localhost'].includes(url.hostname)||!url.port||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw new Error('Invalid existing bridge core_url');
+  coreUrl=value;
+ }
+} catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
 const cache=resolve(import.meta.dirname,'../work/unionclef-downloads');await mkdir(cache,{recursive:true});
 const jar=join(cache,'unionclef-1.21.11-0.95.63.jar');let bytes:Buffer;let downloaded=false;
 try{bytes=await readFile(jar);}catch(e){
@@ -37,12 +47,12 @@ if(t.configVersion!==undefined&&t.configVersion!==2)throw new Error('Unsupported
 t.configVersion=2;t.allowBreak=true;t.allowPlace=true;
 const tokenPath=join(config,'character-harness-unionclef-mcp.token');
 const bridgeProperties=[
- 'core_url=http://127.0.0.1:3000','character_name=Лада',`token_file=${bridgeTokenPath}`,
- 'system_chat_enabled=false','system_chat_server=mc.agicraft.ru:25565','actions_enabled=false','observation_enabled=true',
+ `core_url=${coreUrl}`,'character_name=Лада',`token_file=${bridgeTokenPath}`,
+ 'system_chat_enabled=true','system_chat_server=mc.agicraft.ru:25565','actions_enabled=true','observation_enabled=true',
  'action_server=mc.agicraft.ru:25565','stt_enabled=true','voice_server=mc.agicraft.ru:25565','stt_url=http://127.0.0.1:3082',
  `stt_token_file=${sttTokenPath}`,'unionclef_enabled=false','unionclef_workspace_enabled=false'
 ].join('\n')+'\n';
-if(!args.includes('--apply')){console.log(JSON.stringify({dry_run:true,game,release,backend:'unionclef_mcp',chat_ingress:true,voice_stt:true,bridge_actions:false}));process.exit(0);}
+if(!args.includes('--apply')){console.log(JSON.stringify({dry_run:true,game,release,backend:'unionclef_mcp',core_url:coreUrl,chat_ingress:true,system_chat:true,voice_stt:true,bridge_actions:true}));process.exit(0);}
 const backup=join(game,'character-harness-backups','unionclef-'+new Date().toISOString().replace(/[:.]/g,'-'));
 await mkdir(backup,{recursive:true,mode:0o700});
 const modFiles=(await readdir(mods)).filter(n=>/^character-harness-bridge-.*\.jar$/.test(n)||/^unionclef.*\.jar$/.test(n));
@@ -55,4 +65,4 @@ for(const [path,data] of [[settings,JSON.stringify(s,null,2)+'\n'],[tungstenPath
 for(const name of modFiles)await rename(join(mods,name),join(backup,name));
 await copyFile(jar,join(mods,'unionclef-1.21.11-0.95.63.jar'));
 await copyFile(bridgeJar,join(mods,'character-harness-bridge-0.2.0.jar'));
-console.log(JSON.stringify({installed:true,game,version:release.version,sha256:release.sha256,backup,chat_ingress:true,voice_stt:true,bridge_actions:false,restart_client_required:true}));
+console.log(JSON.stringify({installed:true,game,version:release.version,sha256:release.sha256,backup,core_url:coreUrl,chat_ingress:true,system_chat:true,voice_stt:true,bridge_actions:true,restart_client_required:true}));

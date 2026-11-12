@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { CodexRpc } from '../packages/codex/rpc.ts';
 import { configureCodex } from '../packages/codex/config.ts';
 import { selectConfiguredModel } from '../packages/codex/model.ts';
@@ -12,7 +13,7 @@ try{
  const models=await rpc.request('model/list',{});
  const selected=selectConfiguredModel(models.data,process.env.CODEX_MODEL??'gpt-6-luna');
  console.log(JSON.stringify({authenticated:true,configured_model:selected.model??selected.id}));
- const t=await rpc.request('thread/start',{ephemeral:true,environments:[],runtimeWorkspaceRoots:[],cwd,sandbox:'read-only',approvalPolicy:'never',dynamicTools:[{type:'function',name:'harness_probe',description:'Test tool',inputSchema:{type:'object',properties:{}}}]});
+ const t=await rpc.request('thread/start',{ephemeral:true,environments:[],runtimeWorkspaceRoots:[],cwd,sandbox:'read-only',approvalPolicy:'never',dynamicTools:[{type:'function',name:'harness_probe',description:readFileSync(new URL('./codex-probe.md',import.meta.url),'utf8'),inputSchema:{type:'object',properties:{}}}]});
  if(!t.thread.id)throw new Error('Thread not created');
  console.log('Codex handshake and isolated thread configuration accepted. No inference.');
 }finally{rpc.close();}

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { fingerprint, ReviewResultSchema } from '../packages/runtime/policy.ts';
 
@@ -24,7 +25,7 @@ if (url.protocol!=='http:' || !['host.docker.internal','127.0.0.1','localhost'].
 const internalCheckpoint=input.phase==='output'&&input.scope==='minecraft_checkpoint';
 const gameInput=input.phase==='input'&&input.scope==='minecraft_goal_input';
 const reviewQuestion=internalCheckpoint||gameInput
-  ? {type:'noul',instructions:input.rules+(gameInput?' Is this context permitted to send to the configured planning model for a Minecraft goal? Check for secrets, sensitive disclosures and prohibited content. Routine in-game coordinates, terrain and progress are allowed.':' Is this internal Minecraft plan or progress record permitted under the rules? Ordinary exploration, route checks, terrain observations and waiting are permitted. Judge content policy; Core separately validates progress and tool access.'),criteria:{
+  ? {type:'noul',instructions:input.rules+(gameInput?readFileSync(new URL('./kev-input.md',import.meta.url),'utf8'):readFileSync(new URL('./kev-output.md',import.meta.url),'utf8')),criteria:{
       true:'Ordinary permitted Minecraft goal or progress, without sensitive or prohibited content.',
       false:'A policy violation, sensitive disclosure, or materially unclear scope.'
     }}
