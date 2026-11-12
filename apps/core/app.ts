@@ -361,7 +361,7 @@ app.post('/owner/events', async req => {
 app.get('/owner/replies', async () => (await pool.query(`SELECT e.id,e.author_id,e.text AS input,r.text AS reply
   FROM social_events e LEFT JOIN replies r ON r.event_id=e.id
   WHERE e.character_id=$1 AND e.audience_id=$2 ORDER BY e.created_at DESC LIMIT 20`, [principal.characterId, principal.audienceId])).rows);
-app.get('/engine/input', async (_req, reply) => {
+app.get('/engine/input', {preHandler:app.rateLimit(),config:{rateLimit:{max:300,timeWindow:'1 minute',keyGenerator:()=> 'engine'}}}, async (_req, reply) => {
   reply.header('Cache-Control', 'no-store');
   if(telegram)await telegram.prepare();
   const event = await nextEvent(principal);
