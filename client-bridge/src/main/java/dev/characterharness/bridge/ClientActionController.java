@@ -147,6 +147,9 @@ final class ClientActionController {
             client.player.setYaw(targetYaw);
             client.player.setPitch(targetPitch);
             turnSet = true;
+            return;
+        }
+        if ("turn".equals(action.kind()) && turnSet) {
             float yawError = Math.abs(net.minecraft.util.math.MathHelper.wrapDegrees(client.player.getYaw() - targetYaw));
             float pitchError = Math.abs(client.player.getPitch() - targetPitch);
             finish(client, action, yawError <= 0.1f && pitchError <= 0.1f ? "completed" : "failed",

@@ -1,0 +1,2 @@
+
+Continue the next unfinished step in the saved plan. Check whether the desired result already exists before repeating a movement. Report a short plain-text observation and verified=true only if the next step is confirmed by current game evidence. If blocked, report verified=false and ask a question only when owner help is needed. Core preserves the original plan and decides whether to continue or complete.

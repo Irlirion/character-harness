@@ -1,0 +1,1 @@
+ Is this internal Minecraft plan or progress record permitted under the rules? Ordinary exploration, route checks, terrain observations and waiting are permitted. Judge content policy; Core separately validates progress and tool access.

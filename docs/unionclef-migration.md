@@ -1,6 +1,6 @@
 # Minecraft через UnionClef MCP
 
-Проект использует гибридную клиентскую схему. UnionClef MCP — единственный исполнитель игровых действий; Fabric client companion передаёт подписанный чат, STT и наблюдения server session. Companion actions и system chat выключены. После установки UnionClef и companion перезапустите выбранный Prism instance.
+Проект использует гибридную клиентскую схему. UnionClef MCP выполняет игровые действия; Fabric client companion передаёт чат, STT и наблюдения server session, а также выполняет ограниченный поворот камеры. Приём системного чата включён только для `mc.agicraft.ru:25565`; имена в нём не подтверждают личность игрока. Поворот через companion включён только на тестовом сервере. После установки UnionClef и companion перезапустите выбранный Prism instance.
 
 ## Установка
 
@@ -14,7 +14,7 @@ node --experimental-strip-types scripts/setup-unionclef.ts '/absolute/path/to/in
 node --experimental-strip-types scripts/setup-unionclef.ts '/absolute/path/to/instance/minecraft' --apply
 ```
 
-Скрипт включает аутентифицированный MCP endpoint на `127.0.0.1:25350`, создаёт отдельный локальный token-файл, устанавливает UnionClef и пересобранный companion jar, а прежние jar/config предварительно складывает в `minecraft/character-harness-backups`. В properties включаются signed chat ingress, STT и наблюдения; `actions_enabled`, system chat и внутренние UnionClef flags выключены. Прочие игровые настройки сохраняются. Возможности break/place остаются настройкой UnionClef/Tungsten.
+Скрипт включает аутентифицированный MCP endpoint на `127.0.0.1:25350`, создаёт отдельный локальный token-файл, устанавливает UnionClef и пересобранный companion jar, а прежние jar/config предварительно складывает в `minecraft/character-harness-backups`. В properties включаются signed chat, системный чат для тестового сервера, STT и наблюдения; `actions_enabled` включён для поворота; внутренние UnionClef flags выключены. Существующий корректный локальный `core_url` сохраняется; для новой установки используется порт 3000. Остальные properties companion задаются скриптом заново. Возможности break/place остаются настройкой UnionClef/Tungsten.
 
 ## Подключение core
 

@@ -1,0 +1,1 @@
+ Observe first. If criterion_met is false, use build once for the current house phase. Report what happened. Core verifies the actual blocks. Do not use navigate; the builder can position itself.

@@ -1,0 +1,1 @@
+No movement command was sent. Pick a different safe surface cell at least 3 horizontal blocks from origin and retry.

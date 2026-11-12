@@ -1,0 +1,1 @@
+ Is this context permitted to send to the configured planning model for a Minecraft goal? Check for secrets, sensitive disclosures and prohibited content. Routine in-game coordinates, terrain and progress are allowed.

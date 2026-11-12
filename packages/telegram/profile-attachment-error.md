@@ -1,0 +1,1 @@
+Do not describe the avatar. Explain that the image could not be attached; the profile text above is still available.
