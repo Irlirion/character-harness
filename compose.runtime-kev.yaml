@@ -1,0 +1,13 @@
+services:
+  core:
+    environment:
+      RUNTIME_STORAGE_ENABLED: 'true'
+      RUNTIME_MINECRAFT_ENABLED: 'true'
+      RUNTIME_MINECRAFT_CONTENT_REVIEW_DISABLED: ${RUNTIME_MINECRAFT_CONTENT_REVIEW_DISABLED:-true}
+      RUNTIME_REVIEWER_CONFIG_FILE: /run/runtime-kev/reviewer.json
+    volumes:
+      - ./work/runtime-kev/reviewer.json:/run/runtime-kev/reviewer.json:ro
+  codex-engine:
+    environment:
+      RUNTIME_ENGINE_ENABLED: 'true'
+      RUNTIME_MINECRAFT_ENABLED: 'true'

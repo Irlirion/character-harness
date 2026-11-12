@@ -31,7 +31,7 @@
 
 Owner endpoint `/owner/inspect-context` показывает реконструкцию текущего bounded input для выбранного pending event и метрики отбора. Он не захватывает lease, не запускает inference и не раскрывает persona. Результат отражает память на момент просмотра, а не исторический snapshot уже исполненного turn.
 
-Minecraft bridge пересылает все видимые signed user messages, кроме собственных сообщений персонажа; упоминание имени не требуется. Системный GAME parser остаётся opt-in и принимает только pinned server `<nickname> text` format. Оба пути создают unverified observations, а не команды. Engine adapter обязан завершить каждый модельный turn локальным typed `turn_finish`: естественный ответ отправляется и озвучивается, явное silence атомарно помечает событие обработанным без reply или speech row. Сообщения не отвечаются автоматически; direct address и вопрос помогают выбрать уместную реакцию.
+Текущая версия UnionClef MCP не передаёт входящие игровые chat/voice события. Minecraft observation поступает read-only через `getGameState`, и считается непроверенным состоянием мира. Engine adapter завершает каждый модельный turn локальным typed `turn_finish`; без реального входящего игрового события агент не просыпается от сообщений в Minecraft.
 
 ## Механизмы
 

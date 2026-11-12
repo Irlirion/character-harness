@@ -8,6 +8,8 @@ const profileEvent = z.object({
   source_key: z.string().regex(/^minecraft:[^\s]{1,300}$/),
   author_id: z.string().uuid(),
   author_provenance: z.literal('fabric_profile_context'),
+  source_server: z.literal(SYSTEM_CHAT_SERVER),
+  session_id: z.string().uuid(),
   text: z.string().min(1).max(1000)
 }).strict();
 
@@ -16,6 +18,7 @@ const systemChatEvent = z.object({
   author_id: z.string().regex(/^minecraft-system:mc\.agicraft\.ru:25565:[a-z0-9_]{1,16}$/),
   author_provenance: z.literal('minecraft_system_chat'),
   source_server: z.literal(SYSTEM_CHAT_SERVER),
+  session_id: z.string().uuid(),
   text: z.string().min(1).max(1000),
   author_metadata:z.object({observed_profile:observedProfile}).strict().optional()
 }).strict();
@@ -25,6 +28,7 @@ const voiceEvent = z.object({
   author_id: z.string().regex(/^minecraft-voice:mc\.agicraft\.ru:25565:[0-9a-f-]{36}$/),
   author_provenance: z.literal('minecraft_voice_stt'),
   source_server: z.literal(SYSTEM_CHAT_SERVER),
+  session_id: z.string().uuid(),
   text: z.string().min(1).max(1000),
   author_metadata:z.object({observed_profile:observedVoicePlayer}).strict().optional()
 }).strict();
@@ -48,5 +52,11 @@ export function parseBridgeEvent(input: unknown, allowSystemChatPublicDemo: bool
       && (!allowSystemChatPublicDemo || audienceId !== 'demo-public')) {
     throw new BridgeEventScopeError();
   }
-  return { ...event, author_trust: 'unverified', author_metadata: 'author_metadata' in event ? event.author_metadata ?? {} : {} };
+  return {
+    source_key:event.source_key,author_id:event.author_id,text:event.text,author_provenance:event.author_provenance,
+    author_trust:'unverified',author_metadata:{
+      ...('author_metadata' in event?event.author_metadata??{}:{}),
+      bridge_session_id:event.session_id,source_server:event.source_server
+    }
+  };
 }

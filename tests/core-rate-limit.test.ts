@@ -17,11 +17,10 @@ function harness() {
     status: async () => { accesses++; return { paused: false }; }, search: unused, remember: unused,
     control: unused, ingest: unused, nextEvent: unused, recentConversation: unused, complete: unused, deferEvent: unused,
     enqueueSpeech: unused, claimSpeech: async () => null, speechState: unused, updateSpeech: unused,
-    enqueueClientAction: unused, clientActionStatus: unused, clientActionLease: unused,
-    claimClientAction: async () => null, finishClientAction: unused, saveWorldObservation: unused,
-    latestWorldObservation: unused, cancelClientActions: async () => ({ cancelled: true })
-  };
-  const app = buildApp({ principal, tokens, deps, allowSystemChatPublicDemo: false });
+
+
+     };
+  const app = buildApp({ principal, tokens, deps, });
   return { app, deps, accesses: () => accesses };
 }
 
@@ -42,7 +41,7 @@ test('role budget spans routes, rejects before DB work, ignores spoofed IP, and 
     for (let i = 0; i < 360; i++) {
       assert.equal((await h.app.inject({ method: 'POST', url: '/audio/claim', headers: { authorization: `Bearer ${tokens.audio}` } })).statusCode, 200);
     }
-    assert.equal((await h.app.inject({ url: '/owner/replies', headers: { authorization: `Bearer ${tokens.bridge}` } })).statusCode, 401);
+    assert.equal((await h.app.inject({ url: '/owner/replies', headers: { authorization: `Bearer ${'b'.repeat(64)}` } })).statusCode, 401);
   } finally { await h.app.close(); }
 });
 
@@ -51,7 +50,7 @@ test('admission failures are retryable 429 responses', async () => {
     const h = harness();
     h.deps.ingest = async () => { throw new DomainError(code); };
     // buildApp captures dependencies, so build after overriding ingest.
-    const app = buildApp({ principal, tokens, deps: h.deps, allowSystemChatPublicDemo: false });
+    const app = buildApp({ principal, tokens, deps: h.deps, });
     try {
       const r = await app.inject({ method: 'POST', url: '/owner/events', headers: { authorization: `Bearer ${tokens.owner}` },
         payload: { source_key: 'test', author_id: 'test', text: 'hi' } });
@@ -70,7 +69,7 @@ test('updated MCP SDK works through the authenticated core and restricted HTTP c
     await client.connect(new StreamableHTTPClientTransport(new URL(base + '/mcp'), {
       fetch: coreFetch, requestInit: { headers: { Authorization: `Bearer ${tokens.engine}` } }
     }));
-    assert.deepEqual((await client.listTools()).tools.map(t => t.name).sort(), ['agent_action_status', 'agent_get_status', 'agent_observe', 'agent_turn', 'agent_walk', 'memory_propose', 'memory_search', 'memory_social_list', 'memory_stage_delta']);
+    assert.deepEqual((await client.listTools()).tools.map(t => t.name).sort(), ['agent_get_status', 'memory_propose', 'memory_search', 'memory_social_list', 'memory_stage_delta']);
     const result = await client.callTool({ name: 'agent_get_status', arguments: {} });
     assert.equal(result.isError, undefined);
     assert.deepEqual(result.content, [{ type: 'text', text: '{"paused":false}' }]);
@@ -84,9 +83,8 @@ test('MCP stage and obligation retrieval use trusted event/epoch headers',async(
     control:async()=>({}),ingest:async()=>({inserted:true,event_id:null}),nextEvent:async()=>null,recentConversation:async()=>[],complete:async()=>({}),deferEvent:async()=>({}),
     stageMemory:async(...args:any[])=>{calls.push(['stage',...args]);return {staged:true,stage_version:1};},
     socialCommitmentPage:async(...args:any[])=>{calls.push(['list',...args]);return {items:[],total:0,offset:0,limit:5};},
-    enqueueSpeech:async()=>({}),claimSpeech:async()=>null,speechState:async()=>null,updateSpeech:async()=>({}), enqueueClientAction:async()=>({}),clientActionStatus:async()=>({}),clientActionLease:async()=>({}),claimClientAction:async()=>null,finishClientAction:async()=>({}),saveWorldObservation:async()=>({}),latestWorldObservation:async()=>null,cancelClientActions:async()=>({})
-  };
-  const app=buildApp({principal,tokens,deps,allowSystemChatPublicDemo:false});
+    enqueueSpeech:async()=>({}),claimSpeech:async()=>null,speechState:async()=>null,updateSpeech:async()=>({}), };
+  const app=buildApp({principal,tokens,deps,});
   const client=new Client({name:'scope-test',version:'1'});
   const eventId='11111111-1111-4111-8111-111111111111';
   try{
@@ -108,58 +106,10 @@ test('MCP stage and obligation retrieval use trusted event/epoch headers',async(
   }finally{await client.close();await app.close();}
 });
 
-test('bridge polling leaves event admission available and keeps its own bounded budget', async () => {
-  const h = harness();
-  let ingested = 0;
-  h.deps.ingest = async () => { ingested++; return { inserted: true, event_id: null }; };
-  const app = buildApp({ principal, tokens, deps: h.deps, allowSystemChatPublicDemo: false });
-  const headers = { authorization: `Bearer ${tokens.bridge}` };
-  try {
-    // 400 action polls + 60 reply polls + 240 lease polls fit in one minute.
-    for (let i = 0; i < 700; i++) {
-      const r = await app.inject({ method: 'POST', url: '/bridge/actions/claim', headers, payload: {} });
-      assert.equal(r.statusCode, 200);
-    }
-    for (let i = 0; i < 180; i++) {
-      const r = await app.inject({ method: 'POST', url: '/bridge/events', headers, payload: {
-        source_key: `minecraft:11111111-1111-4111-8111-111111111111:${i}`,
-        author_id: '11111111-1111-4111-8111-111111111111',
-        author_provenance: 'fabric_profile_context', text: 'hi'
-      } });
-      assert.equal(r.statusCode, 200);
-    }
-    assert.equal((await app.inject({ method: 'POST', url: '/bridge/events', headers, payload: {} })).statusCode, 429);
-    assert.equal(ingested, 180);
-    for (let i = 700; i < 900; i++) {
-      assert.equal((await app.inject({ method: 'POST', url: '/bridge/actions/claim', headers, payload: {} })).statusCode, 200);
-    }
-    assert.equal((await app.inject({ method: 'POST', url: '/bridge/actions/claim', headers, payload: {} })).statusCode, 429);
-  } finally { await app.close(); await h.app.close(); }
-});
-
-
-test('reply polling and public chat claims have explicit shared-token limits before DB access',async()=>{
-  for (const route of [{method:'GET' as const,url:'/bridge/replies?chat=true',max:120},{method:'POST' as const,url:'/bridge/replies/00000000-0000-4000-8000-000000000001/claim-chat',max:60}]) {
-    const h=harness();
-    try {
-      for(let i=0;i<route.max;i++) {
-        const response=await h.app.inject({method:route.method,url:route.url,headers:{authorization:`Bearer ${tokens.bridge}`}});
-        assert.equal(response.statusCode,200);
-      }
-      const before=h.accesses();
-      const blocked=await h.app.inject({method:route.method,url:route.url,headers:{authorization:`Bearer ${tokens.bridge}`,'x-forwarded-for':'8.8.8.8'}});
-      assert.equal(blocked.statusCode,429);
-      assert.equal(h.accesses(),before);
-      assert.equal((await h.app.inject({method:'POST',url:'/audio/claim',headers:{authorization:`Bearer ${tokens.audio}`}})).statusCode,200);
-    }finally{await h.app.close();}
-  }
-});
-
-
 test('image polling and results share the engine budget and reject before database access',async()=>{
  const h=harness();let calls=0;
  const images={claim:async()=>{calls++;return null;},finish:async()=>{calls++;return {saved:true};},status:async()=>({jobs:[]})} as unknown as ImageStore;
- const app=buildApp({principal,tokens,deps:h.deps,allowSystemChatPublicDemo:false,images});
+ const app=buildApp({principal,tokens,deps:h.deps,images});
  const headers={authorization:`Bearer ${tokens.engine}`};
  try{
   assert.equal((await app.inject({method:'POST',url:'/engine/images/claim',headers:{authorization:`Bearer ${tokens.owner}`},payload:{}})).statusCode,401);
@@ -176,12 +126,3 @@ test('image polling and results share the engine budget and reject before databa
   assert.equal((await app.inject({url:'/owner/images',headers:{authorization:`Bearer ${tokens.owner}`}})).statusCode,200);
  }finally{await app.close();await h.app.close();}
 });
-
- test('UnionClef mode exposes the queued navigation tool instead of key walking',async()=>{
-  const h=harness();const app=buildApp({principal,tokens,deps:h.deps,allowSystemChatPublicDemo:false,minecraftBackend:'unionclef'});
-  const client=new Client({name:'unionclef-catalog',version:'1'});
-  try{const base=await app.listen({host:'127.0.0.1',port:0});await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{fetch:coreFetch,requestInit:{headers:{Authorization:`Bearer ${tokens.engine}`}}}));
-   const names=(await client.listTools()).tools.map(t=>t.name);assert.ok(names.includes('agent_goto'));assert.ok(!names.includes('agent_walk'));assert.ok(!names.includes('ExecuteCommand'));
-   const denied=await client.callTool({name:'agent_goto',arguments:{x:0,y:64,z:0,invocation_id:'test',expected_epoch:1}});assert.equal(denied.isError,true);assert.match(JSON.stringify(denied),/client_world_disabled/);
-  }finally{await client.close();await app.close();await h.app.close();}
- });

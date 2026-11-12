@@ -2,7 +2,7 @@
 
 Харнес для автономных персонажей, которые действуют в Minecraft, Telegram и других средах, сохраняют память и расширяют свои возможности.
 
-Статус 2026-10-10: Docker core/MCP/PostgreSQL и Codex engine проверены; Qwen3-TTS 0.6B CustomVoice 8bit на MLX и audio worker работают нативно на Mac. Пользователь подтвердил слышимость автоматической речи через Loopback и Simple Voice Chat. Это подтверждает аудио-путь, но не полный игровой LLM-цикл. Текущая установка описана в [инструкции audio worker](docs/audio-worker.md). Client-only Fabric bridge собран для отдельного Prism test instance. Для игровых сообщений через SYSTEM/GAME предусмотрен opt-in adapter только для `mc.agicraft.ru:25565` и `demo-public`; никнейм остаётся недоверенной личностью. Server addon не нужен.
+Последний аудит состояния кода: 2026-11-07 — [обзор проекта](docs/reviews/current-state-review.md). Minecraft использует гибридную схему: UnionClef MCP выполняет игровые действия, Fabric client companion передаёт чат, голосовые транскрипты и сведения о сессии. Companion не выполняет игровые действия. Локальная веб-панель владельца открывается на `http://localhost:3000/`; для входа нужен `OWNER_TOKEN`.
 
 Главная цель MVP — социальный вау-эффект для участников Minecraft-сервера и Telegram: узнаваемый персонаж с памятью, характером и уместной инициативой.
 
@@ -32,12 +32,12 @@ Telegram Bot API MVP: личка, одна группа с выбором reply/
 - [Запуск в Docker](docs/docker.md)
 - [Стек первой версии](docs/technology-stack.md)
 - [Автоматический голос через Loopback](docs/audio-worker.md)
-- [Голос Minecraft: Simple Voice Chat](docs/integrations/minecraft-voice.md)
-- [Интеграция Minecraft](docs/integrations/minecraft.md)
+- [UnionClef Minecraft MCP](docs/unionclef-migration.md)
+- [Входящий Minecraft чат и голос](docs/integrations/minecraft-voice.md)
+- [Текущий Fabric companion](client-bridge/README.md)
 - [Интеграция Telegram](docs/integrations/telegram.md)
 - [Движки Pi Agent и Codex](docs/engines.md)
 - [Codex runtime и вход через подписку](docs/codex-engine.md)
-- [Fabric client bridge](client-bridge/README.md)
 - [Персонажи и адаптация](docs/characters.md)
 - [Персоналия Лады](characters/Lada/personalities.yml)
 - [Память и контекст](docs/memory-context.md)
@@ -48,6 +48,7 @@ Telegram Bot API MVP: личка, одна группа с выбором reply/
 - [Варианты реализации](docs/implementation-options.md)
 - [Варианты памяти](docs/memory-options.md)
 - [План реализации](docs/roadmap.md)
+- [Обзор текущего состояния и незакрытые риски](docs/reviews/current-state-review.md)
 - [Архитектурные решения](docs/decisions/0001-character-runtime.md)
 - [Журнал работы](docs/journal.md)
 

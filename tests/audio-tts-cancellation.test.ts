@@ -60,6 +60,10 @@ test(`permission revocation aborts in-flight ${provider} fetch before player sta
   try {
     const corePort = await listen(core = createServer(async (request, response) => {
       const path = request.url ?? '/';
+      if (path === '/audio/heartbeat' && request.method === 'POST') {
+        await collectBody(request);
+        return sendJson(response, { ok: true });
+      }
       if (path === '/audio/claim' && request.method === 'POST') {
         await collectBody(request);
         claimCount++;

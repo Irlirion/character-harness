@@ -27,7 +27,6 @@ test('runtime engine HTTP + database integration, without external models', {ski
   await db.query("INSERT INTO characters(id,name,persona) VALUES('lada','Lada','Persona')");
   process.env.DATABASE_URL=url.toString();
   const legacy=await import('../packages/storage/db.ts');legacyPool=legacy.pool;
-  const actions=await import('../packages/storage/actions.ts');
   const store=new RuntimeStore(db);const auth=new RuntimeAuthorizationStore(db);
   await auth.installProfile(p,testProfile({version:'test.pi',engine:'pi'}));
   const app=runtimeApp({runtime:store,runtimeEngine:store,runtimePolicy:new RuntimePolicyGate(store,auth,allowTestReviewer)},
@@ -92,10 +91,9 @@ test('runtime engine HTTP + database integration, without external models', {ski
     assert.equal(saved.activity.status,'ready');assert.equal(saved.activity.turns_used,2);assert.equal(saved.checkpoint.state,'Plan from fake Codex');
     assert.equal((await db.query('SELECT observed_tokens FROM runtime_model_grants ORDER BY created_at DESC LIMIT 1')).rows[0].observed_tokens,'222');
     assert.equal((await db.query('SELECT count(*)::int AS n FROM replies')).rows[0].n,0);
-    assert.equal((await db.query('SELECT count(*)::int AS n FROM client_actions')).rows[0].n,0);
    });
 
-   await t.test('runtime leases cannot authorize legacy MCP, memory writes or movement',async()=>{
+   await t.test('runtime leases cannot authorize legacy MCP or memory writes',async()=>{
     await db.query("UPDATE runtime_wakeups SET available_at=clock_timestamp()-interval '1 second' WHERE state='pending'");
     const claim:any=await api('/engine/next_work',{request_id:'isolation',...testIdentity});const w=claim.work;assert.ok(w);
     const l={turn_id:w.turn.id,epoch:w.turn.epoch,lease_token:w.turn.lease_token};
@@ -103,7 +101,6 @@ test('runtime engine HTTP + database integration, without external models', {ski
     assert.equal((await store.lease({...p,audienceId:'private'},l)).valid,false);
     assert.equal((await store.lease(p,{...l,lease_token:randomUUID()})).valid,false);
     await assert.rejects(legacy.remember(p,'Must not save','forbidden',w.turn.epoch),{code:'runtime_tools_disabled'});
-    await assert.rejects(actions.enqueueClientAction(p,'forbidden','turn',{yaw_degrees:30},0,w.turn.epoch),{code:'runtime_tools_disabled'});
     const mcp=await app.inject({method:'POST',url:'/mcp',headers,payload:{jsonrpc:'2.0',id:1,method:'tools/list'}});
     assert.equal(mcp.statusCode,409);assert.equal(mcp.json().error,'runtime_tools_disabled');
     await legacy.control(p,true);

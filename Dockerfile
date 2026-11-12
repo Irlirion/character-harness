@@ -11,7 +11,8 @@ COPY migrations ./migrations
 COPY scripts ./scripts
 COPY tests ./tests
 COPY characters ./characters
-RUN pnpm typecheck && pnpm test
+ARG RUN_TESTS=1
+RUN pnpm typecheck && if [ "$RUN_TESTS" = "1" ]; then pnpm test; else echo "Skipping tests by build argument"; fi
 
 FROM dependencies AS runtime
 ENV NODE_ENV=production

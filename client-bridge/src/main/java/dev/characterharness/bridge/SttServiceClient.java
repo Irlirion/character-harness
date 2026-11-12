@@ -79,6 +79,16 @@ final class SttServiceClient {
         }
     }
 
+    boolean ready() {
+        try {
+            HttpRequest request=HttpRequest.newBuilder(endpoint.resolve("/ready")).timeout(Duration.ofSeconds(2)).GET().build();
+            HttpResponse<String> response=http.send(request,HttpResponse.BodyHandlers.ofString(java.nio.charset.StandardCharsets.UTF_8));
+            if(response.statusCode()!=200||response.body().length()>256)return false;
+            JsonObject json=JsonParser.parseString(response.body()).getAsJsonObject();
+            return json.has("ready")&&json.get("ready").isJsonPrimitive()&&json.get("ready").getAsBoolean();
+        } catch(Exception ignored) { return false; }
+    }
+
     private static byte[] toLittleEndian(short[] samples) {
         ByteBuffer buffer = ByteBuffer.allocate(samples.length * Short.BYTES).order(ByteOrder.LITTLE_ENDIAN);
         for (short sample : samples) buffer.putShort(sample);

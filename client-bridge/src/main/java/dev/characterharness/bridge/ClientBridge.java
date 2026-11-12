@@ -81,6 +81,7 @@ public final class ClientBridge implements ClientModInitializer {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).followRedirects(HttpClient.Redirect.NEVER).build();
     private BridgeConfig config;
     private SttServiceClient sttService;
+    private volatile boolean sttReady;
     private boolean systemServerWarningLogged;
     private ClientActionController actionController;
     private UnionClefNavigation unionclef;
@@ -110,6 +111,7 @@ public final class ClientBridge implements ClientModInitializer {
         ClientLifecycleEvents.CLIENT_STOPPING.register(this::onClientStopping);
         if(config.workspaceEnabled()&&config.unionclefEnabled())workspaceIo.scheduleWithFixedDelay(this::pollWorkspaceLease,0,500,TimeUnit.MILLISECONDS);
         io.scheduleWithFixedDelay(this::pollReplies, 1, 1, TimeUnit.SECONDS);
+        if(config.sttEnabled())observationIo.scheduleWithFixedDelay(this::pollSttReadiness,0,5,TimeUnit.SECONDS);
         if (config.actionsEnabled()) actionIo.scheduleWithFixedDelay(this::pollActions, 0, 150, TimeUnit.MILLISECONDS);
         LOG.info("Bridge enabled for visible user chat; account UUIDs are forwarded as supplied by the server chat context. systemChatEnabled={}", config.systemChatEnabled());
     }
@@ -175,7 +177,7 @@ public final class ClientBridge implements ClientModInitializer {
                 String sourceKey = author + ":" + Instant.now().toEpochMilli() + ":" + digest;
                 JsonObject metadata=speakerMetadata.deepCopy(); JsonObject observed=nearbyPlayers.get(segment.speaker());
                 if(observed!=null){JsonObject profile=new JsonObject();profile.addProperty("uuid",segment.speaker().toString());profile.addProperty("name",observed.get("name").getAsString());profile.addProperty("distance",observed.get("distance").getAsDouble());profile.addProperty("bearing_degrees",observed.get("bearing_degrees").getAsDouble());profile.addProperty("line_of_sight",observed.get("line_of_sight").getAsBoolean());metadata.add("observed_profile",profile);}
-                forwardEvent(sourceKey, author, "minecraft_voice_stt", server, text,metadata);
+                forwardEvent(sourceKey, author, "minecraft_voice_stt", server, text,metadata,sessionId);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             } catch (Exception error) { LOG.warn("Voice transcription failed: {}", error.getMessage()); }
@@ -275,6 +277,8 @@ public final class ClientBridge implements ClientModInitializer {
         if (actionController != null) actionController.tick(client);
     }
 
+    private void pollSttReadiness(){sttReady=sttService!=null&&sttService.ready();}
+
     private void syncWorldSession(MinecraftClient client){
         String server=null;
         boolean featureEnabled=config.observationEnabled()||config.actionsEnabled()||config.sttEnabled()||config.systemChatEnabled();
@@ -320,13 +324,13 @@ public final class ClientBridge implements ClientModInitializer {
         UUID author = signed.getSender();
         if (!author.equals(profileId)) return;
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || client.player.getUuid().equals(author)) return;
+        if (client.player == null || client.player.getUuid().equals(author) || activeWorldSessionId == null || activeWorldServer == null) return;
         String text = ChatAddress.visible(signed.getSignedContent(), signed.filterMask());
         if (text == null || text.length() > 1000 || !deduplicator.claim(sender.name(),text,"chat",System.nanoTime())) return;
         try {
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
             String sourceKey = "minecraft:" + author + ":" + received.toEpochMilli() + ":" + digest;
-            forwardEvent(sourceKey, author.toString(), "fabric_profile_context", null, text);
+            forwardEvent(sourceKey, author.toString(), "fabric_profile_context", activeWorldServer, text, null, activeWorldSessionId);
         } catch (Exception error) {
             LOG.warn("Could not forward chat event: {}", error.getClass().getSimpleName());
         }
@@ -346,7 +350,7 @@ public final class ClientBridge implements ClientModInitializer {
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(parsed.text().getBytes(StandardCharsets.UTF_8)));
             String sourceKey = "minecraft-system:" + config.systemChatServer() + ":" + nickname + ":" + Instant.now().toEpochMilli() + ":" + digest;
             JsonObject metadata=resolveOnlineProfile(client,parsed.nickname());
-            forwardEvent(sourceKey, authorId, "minecraft_system_chat", config.systemChatServer(), parsed.text(),metadata);
+            forwardEvent(sourceKey, authorId, "minecraft_system_chat", config.systemChatServer(), parsed.text(),metadata,activeWorldSessionId);
         } catch (Exception error) {
             LOG.warn("Could not forward system chat event: {}", error.getClass().getSimpleName());
         }
@@ -372,11 +376,17 @@ public final class ClientBridge implements ClientModInitializer {
     }
 
     private void forwardEvent(String sourceKey, String authorId, String authorProvenance, String sourceServer, String text,JsonObject metadata) {
+        forwardEvent(sourceKey,authorId,authorProvenance,sourceServer,text,metadata,activeWorldSessionId);
+    }
+
+    private void forwardEvent(String sourceKey, String authorId, String authorProvenance, String sourceServer, String text,JsonObject metadata,String sessionId) {
+        if(sourceServer==null||sessionId==null)return;
         JsonObject body = new JsonObject();
         body.addProperty("source_key", sourceKey);
         body.addProperty("author_id", authorId);
         body.addProperty("author_provenance", authorProvenance);
-        if (sourceServer != null) body.addProperty("source_server", sourceServer);
+        body.addProperty("source_server", sourceServer);
+        body.addProperty("session_id", sessionId);
         if(metadata!=null&&!metadata.entrySet().isEmpty())body.add("author_metadata",metadata);
         body.addProperty("text", text);
         io.execute(() -> {
@@ -409,6 +419,7 @@ public final class ClientBridge implements ClientModInitializer {
     private void publishWorldObservation(MinecraftClient client){
         if(client.player==null||client.world==null||client.getNetworkHandler()==null||activeWorldSessionId==null||!config.observationEnabled())return;
         JsonObject body=new JsonObject();body.addProperty("session_id",activeWorldSessionId);body.addProperty("connected",true);body.addProperty("server",config.actionServer());body.addProperty("observed_at",Instant.now().toString());
+        JsonObject features=new JsonObject();features.addProperty("chat_ingress",true);features.addProperty("voice_stt_enabled",config.sttEnabled());features.addProperty("voicechat_available",VoiceChatPlugin.isAvailable());features.addProperty("stt_ready",sttReady);body.add("features",features);
         JsonObject self=new JsonObject();self.addProperty("x",client.player.getX());self.addProperty("y",client.player.getY());self.addProperty("z",client.player.getZ());
         self.addProperty("yaw",MathHelper.wrapDegrees(client.player.getYaw()));self.addProperty("pitch",client.player.getPitch());
         Vec3d v=client.player.getVelocity();self.addProperty("vx",v.x);self.addProperty("vy",v.y);self.addProperty("vz",v.z);
@@ -480,7 +491,10 @@ public final class ClientBridge implements ClientModInitializer {
 
     private void pollReplies() {
         try {
-            HttpResponse<String> response = request("GET", "/bridge/replies?chat=true", null);
+            String sessionId=activeWorldSessionId;
+            String server=activeWorldServer;
+            if(sessionId==null||server==null||!server.equals(config.voiceServer()))return;
+            HttpResponse<String> response = request("GET", "/bridge/replies?chat=true&session_id="+sessionId+"&server="+server, null);
             if (response.statusCode() != 200) return;
             JsonArray replies = JsonParser.parseString(response.body()).getAsJsonArray();
             for (int i = 0; i < replies.size(); i++) {
@@ -490,9 +504,9 @@ public final class ClientBridge implements ClientModInitializer {
                 if (text.isBlank() || text.length() > 300 || !queuedReplies.add(id)) continue;
                 String channel = reply.has("channel") ? reply.get("channel").getAsString() : "local";
                 if ("chat".equals(channel)) {
-                    String sessionId = activeWorldSessionId;
                     if (sessionId == null || !PublicChatReply.valid(text)) { queuedReplies.remove(id); continue; }
-                    HttpResponse<String> claim = request("POST", "/bridge/replies/" + id + "/claim-chat", "{}");
+                    JsonObject claimBody=new JsonObject();claimBody.addProperty("session_id",sessionId);claimBody.addProperty("server",server);
+                    HttpResponse<String> claim = request("POST", "/bridge/replies/" + id + "/claim-chat", claimBody.toString());
                     if (claim.statusCode()!=200 || !JsonParser.parseString(claim.body()).getAsJsonObject().get("claimed").getAsBoolean()) { queuedReplies.remove(id); continue; }
                     MinecraftClient.getInstance().execute(() -> {
                         try {
@@ -514,7 +528,8 @@ public final class ClientBridge implements ClientModInitializer {
                             .append(Text.literal(text).formatted(Formatting.WHITE)), false);
                     io.execute(() -> {
                         try {
-                            HttpResponse<String> ack = request("POST", "/bridge/replies/" + id + "/ack", "{}");
+                            JsonObject ackBody=new JsonObject();ackBody.addProperty("session_id",sessionId);ackBody.addProperty("server",server);
+                            HttpResponse<String> ack = request("POST", "/bridge/replies/" + id + "/ack", ackBody.toString());
                             if (ack.statusCode() != 200) throw new IllegalStateException("ack_status_" + ack.statusCode());
                         }
                         catch (Exception error) { LOG.warn("Could not acknowledge reply: {}", error.getClass().getSimpleName()); }

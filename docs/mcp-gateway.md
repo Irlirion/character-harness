@@ -79,4 +79,4 @@ MCP resources могут предоставлять сводку персона�
 
 ## Голос Minecraft
 
-Добавляется minecraft_speak с возвратом operation_id. Аудиопоток идёт вне MCP/LLM-контекста через доверенный voice bridge. [Контракт голоса](integrations/minecraft-voice.md).
+Minecraft voice tool пока не подключён: UnionClef v0.95.63 не публикует audio ingress/output в MCP. Native TTS/audio worker остаётся отдельным компонентом.

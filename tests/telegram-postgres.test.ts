@@ -219,11 +219,10 @@ test('Telegram PostgreSQL and HTTP contracts', {skip:!process.env.TEST_DATABASE_
    await pool.query("INSERT INTO runtime_shared_desks(character_id,notes,plan) VALUES('lada','COMMON_AGENT_NOTE','COMMON_AGENT_PLAN')");
    const tokens={engine:'e'.repeat(64),owner:'o'.repeat(64),audio:'a'.repeat(64),bridge:'b'.repeat(64),telegram:'t'.repeat(64)};
    const unused=async()=>{throw new Error('unexpected_game_dependency');};
-   const app=buildApp({principal:p,tokens,telegram:store,allowSystemChatPublicDemo:false,allowClientWorld:true,deps:{
+   const app=buildApp({principal:p,tokens,telegram:store,deps:{
     ...storage,pool,loadSharedDesk:p=>sharedDesk(pool,p.characterId),nextEvent:p=>storage.nextEvent(p,true),enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,
-    enqueueClientAction:unused,clientActionStatus:unused,clientActionLease:unused,claimClientAction:unused,finishClientAction:unused,
-    saveWorldObservation:unused,latestWorldObservation:unused,cancelClientActions:unused
-   }});
+
+    }});
    try {
     assert.equal((await app.inject({method:'POST',url:'/telegram/claim',headers:{authorization:`Bearer ${tokens.engine}`},payload:{}})).statusCode,401);
     const r=await app.inject({url:'/engine/input',headers:{authorization:`Bearer ${tokens.engine}`}});assert.equal(r.statusCode,200);

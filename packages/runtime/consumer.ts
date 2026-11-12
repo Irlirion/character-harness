@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { NextWorkSchema, PlanningDecisionSchema, planningInput, type PlanningDecision, type PlanningInput, type RuntimeWork } from './protocol.ts';
 
 export type RuntimeApi = (path:string,body:unknown)=>Promise<unknown>;
-export type PlanningRunner = (input:PlanningInput,persona:string,signal:AbortSignal,onUsage?:(totalTokens:number)=>void)=>Promise<PlanningDecision>;
+export type RuntimeGameCall = (action:unknown)=>Promise<unknown>;
+export type PlanningRunner = (input:PlanningInput,persona:string,signal:AbortSignal,onUsage?:(totalTokens:number)=>void,game?:RuntimeGameCall)=>Promise<PlanningDecision>;
 
 /** Abort also wins when a provider ignores its cancellation request. */
 export async function abortable<T>(promise:Promise<T>,signal:AbortSignal):Promise<T> {
@@ -64,6 +65,9 @@ export class RuntimeConsumer {
       controller.signal.throwIfAborted();
       const decision=PlanningDecisionSchema.parse(await abortable(run(planningInput(work),work.persona,controller.signal,total=>{
         if(Number.isSafeInteger(total)&&total>=0)observedTokens=Math.max(observedTokens??0,total);
+      },async action=>{
+        controller.signal.throwIfAborted();
+        return abortable(this.api('/engine/work_minecraft',{...(action as object),lease}),controller.signal);
       }),controller.signal));
       await abortable(valid(),controller.signal);
       controller.signal.throwIfAborted();

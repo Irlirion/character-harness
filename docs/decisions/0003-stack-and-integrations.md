@@ -18,4 +18,4 @@ Supervisor управляет отдельными процессами движ
 
 Нужно проверить совместимость версий и восстановление после сбоев. IPC не является sandbox. Пользователь выбрал клиентские аккаунты Telegram для общения и взаимодействия с ботами. Эти решения не означают, что код уже реализован.
 
-Подробнее: [стек](../technology-stack.md), [Minecraft](../integrations/minecraft.md), [Telegram](../integrations/telegram.md).
+Исторический выбор интеграций: [стек](../technology-stack.md), [текущая интеграция Minecraft через UnionClef](../unionclef-migration.md), [Telegram](../integrations/telegram.md).

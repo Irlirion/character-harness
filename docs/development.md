@@ -48,11 +48,11 @@ Owner API принимает синтетическое социальное с�
 
 GET /owner/replies показывает сохранённый ответ. Источник является текстом участника, а не подтверждением того, что агент действительно строил мост. Персонаж не должен выдумывать участие. /owner/status показывает неготовность реальных адаптеров.
 
-В runtime доступны /owner/pause, /owner/resume и /owner/status. Engine token не даёт доступ к ним. Все браузерные Origin пока запрещены; веб-панель не реализована. /health выдаёт только liveness, /ready проверяет БД и требует engine token.
+В runtime доступны /owner/pause, /owner/resume и /owner/status. Engine token не даёт доступ к ним. Локальная read-only веб-панель открывается на `http://localhost:3000/`; введите значение из `secrets/owner_token` этой рабочей копии. API-панель принимает только same-origin запросы с owner bearer token, другие browser Origin запрещены. `/health` выдаёт только liveness, `/ready` проверяет БД и требует engine token.
 
 ## Codex и клиент Minecraft
 
-Codex runtime и изолированный device login: [Codex engine](codex-engine.md). Модель по умолчанию `gpt-6-luna`; `codex-check.ts` сверяет точное имя в аккаунтном каталоге и не выбирает резервную модель. `scripts/bridge-check.ts` проверяет отдельный bridge token и UUID validation. Client-only Fabric bridge собирается через `client-bridge/gradlew build`; инструкции установки — в [bridge README](../client-bridge/README.md). Для старых установок bridge token создаётся отдельным скриптом, без перезаписи остальных secret-файлов.
+Codex runtime и изолированный device login: [Codex engine](codex-engine.md). Модель по умолчанию `gpt-6-luna`; `codex-check.ts` сверяет точное имя в аккаунтном каталоге и не выбирает резервную модель. Minecraft подключается напрямую к UnionClef MCP; установка и Compose overlay описаны в [инструкции UnionClef](unionclef-migration.md).
 
 При запущенных core, Codex engine и audio worker можно выполнить синтетический полный цикл:
 

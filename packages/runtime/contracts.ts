@@ -5,6 +5,7 @@ export const CreateActivitySchema = z.object({
   invocation_id: z.string().min(1).max(200),
   objective: z.string().trim().min(1).max(4000),
   max_turns: z.number().int().min(1).max(100).default(10),
+  minecraft_goal: z.literal('wooden_house').optional(),
 }).strict();
 export const ClaimWorkSchema = z.object({ request_id: z.string().min(1).max(200), engine:z.enum(['pi','codex']).optional(), model:z.string().min(1).max(200).optional() }).strict();
 export const DecisionSchema = z.discriminatedUnion('action', [

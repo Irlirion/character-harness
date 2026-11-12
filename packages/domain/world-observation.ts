@@ -31,6 +31,7 @@ const self = z.object({
 const time = z.string().refine(v=>Number.isFinite(Date.parse(v)),'invalid_timestamp');
 const connected = z.object({
   session_id:z.string().uuid(), connected:z.literal(true), server:z.literal(SYSTEM_CHAT_SERVER), observed_at:time,
+  features:z.object({chat_ingress:z.boolean(),voice_stt_enabled:z.boolean(),voicechat_available:z.boolean(),stt_ready:z.boolean()}).strict().optional(),
   self, players:z.array(player).max(8),
   entities:z.array(z.object({
     uuid:z.string().uuid(),type:z.string().regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).max(128),

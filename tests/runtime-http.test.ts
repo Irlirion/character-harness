@@ -14,10 +14,10 @@ function harness(runtime?: RuntimeOwnerStore) {
     pool:{query:unused,end:unused},status:async()=>({paused:false}),search:unused,remember:unused,control:unused,
     ingest:unused,nextEvent:unused,recentConversation:unused,complete:unused,deferEvent:unused,
     enqueueSpeech:unused,claimSpeech:unused,speechState:unused,updateSpeech:unused,
-    enqueueClientAction:unused,clientActionStatus:unused,clientActionLease:unused,claimClientAction:unused,
-    finishClientAction:unused,saveWorldObservation:unused,latestWorldObservation:unused,cancelClientActions:unused,
+
+
   };
-  return buildApp({principal,tokens,deps,runtime,allowSystemChatPublicDemo:false});
+  return buildApp({principal,tokens,deps,runtime,});
 }
 
 test('storage flag defaults off, and strict schemas reject forged authority and malformed decisions',()=>{
@@ -39,7 +39,7 @@ test('owner activity API enforces token role, bounded inputs and trusted princip
   const runtime: RuntimeOwnerStore={
     assign:async(...args)=>{calls.push(['assign',...args]);return row;},
     list:async(...args)=>{calls.push(['list',...args]);return [row];},
-    inspect:async(...args)=>{calls.push(['inspect',...args]);return {activity:row,checkpoint:null};},
+    inspect:async(...args)=>{calls.push(['inspect',...args]);return {activity:row,checkpoint:null,history:[],turns:[]};},
     cancel:async(...args)=>{calls.push(['cancel',...args]);return {...row,status:'cancelled'};},
     provideInput:async(...args)=>{calls.push(['input',...args]);return row;},
   };
