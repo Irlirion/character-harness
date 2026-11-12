@@ -56,7 +56,7 @@
       </form>
       <div class="small" id="chat-feedback" role="status">Подключите панель, чтобы отправить сообщение.</div>
     </article>
-    <article class="card wide"><h2>Поток сообщений агента</h2><div class="small" id="shadow-status">—</div><ul class="messages" id="agent-feed"></ul></article>
+    <article class="card wide"><h2>Поток сообщений агента</h2><div class="small" id="feed-status"></div><ul class="messages" id="agent-feed"></ul></article>
     <article class="card full"><h2>Событие в обработке</h2><div class="event" id="event">—</div><div class="chips" id="event-tags"></div></article>
   </section>
   <div class="notice">UnionClef управляет персонажем в мире. Fabric companion передаёт игровой чат и голосовые транскрипты в Core только с разрешённого сервера и привязывает их к текущей сессии. Звуковой ответ зависит от готовности TTS и выбранного микрофонного устройства Simple Voice Chat.</div>
@@ -88,20 +88,6 @@
       input.className='event';
       input.textContent=row.text;
       item.append(meta,input);
-      if(row.shadow_decision){
-        const decisions={silence:'Промолчать',quick_reply:'Быстрый ответ',known_skill:'Знакомый навык',delegate:'Передать медленному контуру'};
-        const shadow=document.createElement('div');
-        shadow.className='small';
-        shadow.textContent=`Тень · ${row.shadow_model} · ${decisions[row.shadow_decision]} · ${row.shadow_reason} · ${row.shadow_latency_ms} мс`;
-        item.append(shadow);
-        if(row.shadow_scores){
-          const scores=document.createElement('div');
-          scores.className='small';
-          scores.textContent=Object.entries(row.shadow_scores)
-            .map(([route,score])=>`${decisions[route]} ${Math.round(score*100)}%`).join(' · ');
-          item.append(scores);
-        }
-      }
       if(row.reply){
         const reply=document.createElement('div');
         reply.className='event message-reply';
@@ -330,8 +316,7 @@
     set('budget-next',budget?'Суточные лимиты действуют для остальных задач.':'');
   }
   function paintChat(chat){
-    const shadowStates={disabled:'Выключен',starting:'Запускается',ready:'Готов',classifying:'Оценивает сообщение',unavailable:'Модель недоступна или вернула ошибку'};
-    set('shadow-status',`Быстрый контур в тени · ${shadowStates[chat.shadow.state]||chat.shadow.state}${chat.shadow.model?' · '+chat.shadow.model:''}`);
+    set('feed-status','');
     paintMessages('owner-chat',chat.messages,true);
     paintMessages('agent-feed',chat.feed,false);
     $('chat-send').disabled=chatBusy;
@@ -364,7 +349,7 @@
       read('Системы','/owner/status',s=>{status=s;paintStatus(s);if(overview)paintOverview(overview,s);paintGoal()},()=>{
         status=null;paintStatus(null);if(overview)paintOverview(overview,null);paintGoal();
       }),
-      read('Чат','/owner/chat',paintChat,()=>{$('chat-send').disabled=true;set('shadow-status','Поток сообщений недоступен. Ниже показаны последние полученные данные.');set('chat-feedback','Чат недоступен. Отправка временно отключена.')}),
+      read('Чат','/owner/chat',paintChat,()=>{$('chat-send').disabled=true;set('feed-status','Поток сообщений недоступен. Ниже показаны последние полученные данные.');set('chat-feedback','Чат недоступен. Отправка временно отключена.')}),
       read('Лимиты','/owner/runtime-policy',p=>{runtimePolicy=p;paintBudget(p);paintGoal()},()=>{runtimePolicy=null;paintBudget(null);paintGoal()}),
       read('Проверки','/owner/runtime-reviews',p=>{reviews=p.reviews;paintGoal();paintActivity()},()=>{reviews=null;paintGoal();paintActivity()}),
       read('Задачи',`/owner/activities?limit=${pageSize}&offset=${offset}`,p=>{
